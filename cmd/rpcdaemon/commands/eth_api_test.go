@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-func TestMyAccountChangesetAccess(t *testing.T) {
+func TestGetBalanceChangesInBlock(t *testing.T) {
 	var myBlockNum uint64 = 5
 
 	db := rpcdaemontest.CreateTestKV(t)

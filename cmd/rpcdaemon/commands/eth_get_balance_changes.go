@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -29,14 +30,14 @@ func (api *APIImpl) GetBalanceChangesInBlock(blockNum uint64) (map[common.Addres
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor("AccountChangeSet")
+	c, err := tx.Cursor(kv.AccountChangeSet)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 	startkey := dbutils.EncodeBlockNumber(blockNum)
 
-	decode := changeset.Mapper["AccountChangeSet"].Decode
+	decode := changeset.Mapper[kv.AccountChangeSet].Decode
 
 	balancesMapping := make(map[common.Address]oldNewBalance)
 
@@ -52,7 +53,7 @@ func (api *APIImpl) GetBalanceChangesInBlock(blockNum uint64) (map[common.Addres
 		}
 		old_balance := (*hexutil.Big)(acc.Balance.ToBig())
 		var commonAddress common.Address
-		copy(commonAddress[:], address[:20])
+		copy(commonAddress[:], address[:common.AddressLength])
 		n := rpc.BlockNumber(blockNum)
 		new_balance, newBalanceErr := api.GetBalance(ctx, commonAddress, rpc.BlockNumberOrHash{BlockNumber: &n})
 		if newBalanceErr != nil {
