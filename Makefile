@@ -1,4 +1,4 @@
-GO = go
+GO = go1.18
 GOBIN = $(CURDIR)/build/bin
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
