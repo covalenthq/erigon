@@ -113,6 +113,7 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return nil
 }
 
+// moskud: just redirects
 func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,

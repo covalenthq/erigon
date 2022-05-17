@@ -238,8 +238,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	// Dump the excution result
 	collector := make(Alloc)
-	// TODO: Where DumpToCollector is declared?
-	//state.DumpToCollector(collector, false, false, false, nil, -1)
+	//s.DumpToCollector(collector, false, false, false, nil, -1)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 
 }

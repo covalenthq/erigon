@@ -118,7 +118,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	defer tx.Rollback()
 
 	var (
-		ibs         = MakePreState(chainConfig.Rules(0), tx, pre.Pre)
+		ibs         = MakePreState(chainConfig.Rules(0), tx, pre.Pre) // moskud: pre.Pre genesis Alloc
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -138,7 +138,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		random := pre.Env.Random.Bytes()
 		difficulty.SetBytes(random)
 	}
-	vmContext := vm.BlockContext{
+	vmContext := vm.BlockContext{ // moskud: BlockContext provides the EVM with auxiliary information.
 		CanTransfer:     core.CanTransfer,
 		Transfer:        core.Transfer,
 		Coinbase:        pre.Env.Coinbase,
@@ -255,6 +255,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 	// Commit block
 	var root common.Hash
+	// moskud: FinalizeTx does similar thing to FinalizeBlockTransaction, but at a tx level.
 	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, 1)); err != nil {
 		return nil, nil, err
 	}
@@ -281,7 +282,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
 	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
-	statedb := state.New(r)
+	statedb := state.New(r) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
@@ -298,6 +299,7 @@ func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAllo
 		}
 	}
 	// Commit and re-open to start with a clean state.
+	// moskud: waaat!?
 	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}

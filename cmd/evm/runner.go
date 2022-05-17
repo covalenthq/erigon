@@ -106,6 +106,9 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 	return output, gasLeft, stats, err
 }
 
+
+// moskud
+// 
 func runCmd(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
@@ -122,8 +125,10 @@ func runCmd(ctx *cli.Context) error {
 	var (
 		tracer        vm.Tracer
 		debugLogger   *vm.StructLogger
-		statedb       *state.IntraBlockState
-		chainConfig   *params.ChainConfig
+		//moskud: caching and managing state changes across the block execution
+		// does bspec.State go here? - genesis info is written into the statedb
+		statedb       *state.IntraBlockState  
+		chainConfig   *params.ChainConfig  
 		sender        = common.BytesToAddress([]byte("sender"))
 		receiver      = common.BytesToAddress([]byte("receiver"))
 		genesisConfig *core.Genesis
@@ -145,17 +150,19 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(core.Genesis)
 	}
-	tx, err := db.BeginRw(context.Background())
+	// moskud: RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV
+	// the readme file has more context on these KV or DB style APIs used here
+	tx, err := db.BeginRw(context.Background())  
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	statedb = state.New(state.NewPlainStateReader(tx))
+	statedb = state.New(state.NewPlainStateReader(tx))  //*IntraBlockState
 	if ctx.GlobalString(SenderFlag.Name) != "" {
 		sender = common.HexToAddress(ctx.GlobalString(SenderFlag.Name))
 	}
-	statedb.CreateAccount(sender, true)
+	statedb.CreateAccount(sender, true)  // creates a state object (?)
 
 	if ctx.GlobalString(ReceiverFlag.Name) != "" {
 		receiver = common.HexToAddress(ctx.GlobalString(ReceiverFlag.Name))
@@ -261,7 +268,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.GlobalBool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
-			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
+			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0) // moskud: this operates at a transaction level (and not block level)
 			return output, gasLeft, err
 		}
 	} else {
@@ -269,7 +276,7 @@ func runCmd(ctx *cli.Context) error {
 			statedb.SetCode(receiver, code)
 		}
 		execFunc = func() ([]byte, uint64, error) {
-			return runtime.Call(receiver, input, &runtimeConfig)
+			return runtime.Call(receiver, input, &runtimeConfig)   // moskud: this operates at a transaction level (and not block level)
 		}
 	}
 

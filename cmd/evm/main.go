@@ -32,7 +32,7 @@ import (
 var (
 	app = flags.NewApp(params.GitCommit, "", "the evm command line interface")
 
-	DebugFlag = cli.BoolFlag{
+	DebugFlag = cli.BoolFlag{ //moskud
 		Name:  "debug",
 		Usage: "output full trace logs",
 	}
@@ -48,11 +48,11 @@ var (
 		Name:  "statdump",
 		Usage: "displays stack and heap memory information",
 	}
-	CodeFlag = cli.StringFlag{
+	CodeFlag = cli.StringFlag{ //moskud
 		Name:  "code",
 		Usage: "EVM code",
 	}
-	CodeFileFlag = cli.StringFlag{
+	CodeFileFlag = cli.StringFlag{ //moskud
 		Name:  "codefile",
 		Usage: "File containing EVM code. If '-' is specified, code is read from stdin ",
 	}
@@ -71,15 +71,15 @@ var (
 		Usage: "value set for the evm",
 		Value: new(big.Int),
 	}
-	DumpFlag = cli.BoolFlag{
+	DumpFlag = cli.BoolFlag{ //moskud
 		Name:  "dump",
 		Usage: "dumps the state after the run",
 	}
-	InputFlag = cli.StringFlag{
+	InputFlag = cli.StringFlag{ //moskud
 		Name:  "input",
 		Usage: "input for the EVM",
 	}
-	InputFileFlag = cli.StringFlag{
+	InputFileFlag = cli.StringFlag{ //moskud
 		Name:  "inputfile",
 		Usage: "file containing input for the EVM",
 	}
@@ -91,15 +91,15 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
-	CreateFlag = cli.BoolFlag{
+	CreateFlag = cli.BoolFlag{ //moskud
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",
 	}
-	GenesisFlag = cli.StringFlag{
+	GenesisFlag = cli.StringFlag{ //moskud
 		Name:  "prestate",
 		Usage: "JSON file with prestate (genesis) config",
 	}
-	MachineFlag = cli.BoolFlag{
+	MachineFlag = cli.BoolFlag{ //moskud
 		Name:  "json",
 		Usage: "output trace logs in machine readable format (json)",
 	}
@@ -182,7 +182,7 @@ func init() {
 	app.Commands = []cli.Command{
 		compileCommand,
 		disasmCommand,
-		runCommand,
+		runCommand, //moskud
 		stateTestCommand,
 		stateTransitionCommand,
 	}

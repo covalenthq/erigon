@@ -84,6 +84,9 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
+
+
+// witness: readData () in blockspecimen
 func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {

@@ -221,19 +221,30 @@ func ExecuteBlockEphemerallyForBSC(
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
-	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) *types.Header,
+	vmConfig *vm.Config, // configuration options for the interpreter
+	getHeader func(hash common.Hash, number uint64) *types.Header, // input: block header hash, block_height
 	engine consensus.Engine,
-	block *types.Block,
+	block *types.Block, // read from db
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	contractHasTEVM func(codeHash common.Hash) (bool, error),
+	contractHasTEVM func(codeHash common.Hash) (bool, error), // transpiled evm (splitting evm codes into even lower level instructions)
 ) (types.Receipts, *types.ReceiptForStorage, error) {
+	//moskud: reads block from stateReader, runs it and writes the result to stateWriter
+	// InitializeBlockExecution: pretty much a no-op (suppose to set the epoch etc.)
+	// DaoHardFork state changes (modifies the state database - refunds to certain accounts)
+	// For each transaction:
+	//    - apply the transaction
+	//    - write the traces (bool); append receipt (bool)
+	// validations
+	// create bloom filter (bool)
+	// finalize block execution (bool) - reward to miner + commit the in-memory changes resulting from the block
+	// some special handling for Bor consensus
+
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
-	ibs := state.New(stateReader)
+	ibs := state.New(stateReader) // responsible for caching & managing state changes occurring during block execution
 	header := block.Header()
 	var receipts types.Receipts
 	usedGas := new(uint64)
@@ -241,6 +252,8 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit())
 
 	if !vmConfig.ReadOnly {
+		// moskud: perform block finalization
+		// for most consensus engines, Initialize is a no op (lol)
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
 			return nil, nil, err
 		}
@@ -252,7 +265,7 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		ibs.Prepare(tx.Hash(), block.Hash(), i) // moskud: IntraBlockState - set the current tx hash, block hash and tx_num
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
@@ -332,14 +345,20 @@ func ExecuteBlockEphemerally(
 	return receipts, stateSyncReceipt, nil
 }
 
+// SysCallContract moskud: calls the contract with the given message (data) and returns the data which the contract execution returned.
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+	// moskud:
+	// apply dao fork statedb changes
+	// construct a message from data passed
+	// create a new evm and execute the message (contract) call, returning what the contract function returned.
+
 	gp := new(GasPool).AddGas(50_000_000)
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	msg := types.NewMessage(
+	msg := types.NewMessage( // Message is a fully derived transaction and implements core.Message
 		state.SystemAddress,
 		&contract,
 		0, u256.Num0,
@@ -372,6 +391,8 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		}
 		return ret, nil
 	}
+	// ApplyMessage computes the new state by applying the given message
+	// against the old state within the environment.
 	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -415,17 +436,22 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
+// moskud: Finalize i.e. allocate the block rewards to the miner (& optionally assemble the resulting block)
+// commit block : finalize the state
+// write the change sets (account and storage diffs) into db
 func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header,
 	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState,
 	receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool,
 ) (newBlock *types.Block, err error) {
+
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	}
+
 	if isMining {
 		newBlock, _, _, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
+		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall) //moskud: accumulate rewards and increment (change ibs) miner's balance
 	}
 	if err != nil {
 		return
@@ -455,6 +481,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 		}
 	}
 
+	// moskud: writing account & storage change sets into db
 	if err := stateWriter.WriteChangeSets(); err != nil {
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
@@ -463,6 +490,10 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+
+	// moskud:
+	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
+	// not sure where the block finalization state transition (like reward distribution) is done here.
 	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	})

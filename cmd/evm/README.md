@@ -1,5 +1,11 @@
 ## EVM state transition tool
 
+## moskud
+Use `make dbg` to create executable with debug symbols
+```bash
+dlv exec ./build/bin/evm t8n -- --input.alloc=cmd/evm/testdata/1/alloc.json --input.txs cmd/evm/testdata/1/txs.json --input.env cmd/evm/testdata/1/env.json
+```
+
 The `evm t8n` tool is a stateless state transition utility. It is a utility
 which can
 

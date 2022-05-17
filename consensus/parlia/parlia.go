@@ -667,6 +667,7 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 //
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
+// Parlia is for BSC
 func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
