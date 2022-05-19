@@ -226,7 +226,7 @@ func ExecuteBlockEphemerally(
 	engine consensus.Engine,
 	block *types.Block, // read from db
 	stateReader state.StateReader,
-	stateWriter state.WriterWithChangeSets,
+	stateWriter state.WriterWithChangeSets, // writes are done by block finalization -> ibs.CommitBlock which updates the world state + changesets
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error), // transpiled evm (splitting evm codes into even lower level instructions)
@@ -438,6 +438,7 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 
 // moskud: Finalize i.e. allocate the block rewards to the miner (& optionally assemble the resulting block)
 // commit block : finalize the state
+// some special handling for Sokol network (chain ID 77) -- don't care
 // write the change sets (account and storage diffs) into db
 func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header,
 	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState,
@@ -469,6 +470,8 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 		}
 	}
 
+	// moskud: write account data, code, storage into the stateWriter
+	// also clears out the journal & refund
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
 		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}

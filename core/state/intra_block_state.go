@@ -663,6 +663,8 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 }
 
 func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+	// moskud: EIP158 is about account clearing (for those with nonce=0, balance=0) thereby reducing state size
+	// check https://github.com/ethereum/EIPs/issues/158
 	emptyRemoval := EIP158Enabled && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
@@ -683,7 +685,7 @@ func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Addr
 				return err
 			}
 		}
-		if err := stateObject.updateTrie(stateWriter); err != nil {
+		if err := stateObject.updateTrie(stateWriter); err != nil { // moskud: WriteAccountStorage for all keys that changed in storage (for this acct)
 			return err
 		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
