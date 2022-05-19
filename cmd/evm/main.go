@@ -22,7 +22,7 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cmd/evm/internal/bsptool"
+	blockSpecimenTool "github.com/ledgerwatch/erigon/cmd/evm/internal/bsptool"
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/flags"
@@ -158,12 +158,11 @@ var bspCommand = cli.Command{
 	Name:    "bsptool",
 	Aliases: []string{"bsp"},
 	Usage:   "executes a block specimen",
-	Action:  bsptool.Main,
+	Action:  blockSpecimenTool.Main,
 	Flags: []cli.Flag{
-		bsptool.InputBSPFlag,
+		blockSpecimenTool.InputBlockSpecimenFlag,
 	},
 }
-
 
 func init() {
 	app.Flags = []cli.Flag{

@@ -1,12 +1,12 @@
-package bsptool
+package blockSpecimenTool
 
 import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"os"
 
+	// "github.com/ledgerwatch/erigon/core/types"
 	"github.com/urfave/cli"
 )
 
@@ -38,113 +38,29 @@ func (n *NumberedError) Code() int {
 	return n.errorCode
 }
 
-type BSP struct {
-	Type            string
-	NetworkId       int
-	Hash            string
-	TotalDifficulty int
-	Header          Header
-	Transactions    []Transaction
-	Uncles          []Uncle
-	Receipts        []Receipt
-	Senders         []string
-	State           State
-}
-
-type Header struct {
-	parentHash       string
-	sha3Uncles       string
-	miner            string
-	stateRoot        string
-	transactionsRoot string
-	receiptsRoot     string
-	logsBloom        []int
-	difficulty       int
-	number           int
-	gasLimit         int
-	gasUsed          int
-	timestamp        int
-	extraData        string
-	mixHash          string
-	nonce            []int
-	baseFeePerGas    int
-}
-
-type Transaction struct {
-	nonce    int
-	gasPrice int
-	gas      int
-	from     string
-	to       string
-	value    int
-	input    string
-}
-
-type Uncle struct{}
-
-type Receipt struct {
-	PostStateOrStatus string
-	CumulativeGasUsed int
-	TxHash            string
-	ContractAddress   string
-	Logs              []Log
-	GasUsed           int
-}
-
-type Log struct {
-	address          string
-	topics           string
-	data             string
-	blockNumber      int
-	transactionHash  string
-	transactionIndex int
-	blockHash        string
-	logIndex         int
-	removed          bool
-}
-
-type State struct {
-	AccountRead []AccountRead
-	StorageRead []StorageRead
-	CodeRead    []CodeRead
-}
-
-type AccountRead struct {
-	Address  string
-	Nonce    int
-	Balance  big.Int
-	CodeHash string
-}
-
-type StorageRead struct {
-	Account string
-	SlotKey string
-	Value   string
-}
-
-type CodeRead struct {
-	Hash string
-	Code string
-}
-
 func Main(ctx *cli.Context) error {
 
 	var (
-		bspStr = ctx.String(InputBSPFlag.Name)
+		blockSpecimenStr = ctx.String(InputBlockSpecimenFlag.Name)
 	)
 
-	inFile, err1 := os.Open(bspStr)
+	inFile, err1 := os.Open(blockSpecimenStr)
 	if err1 != nil {
 		return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
 	}
 	defer inFile.Close()
 	byteValue, _ := ioutil.ReadAll(inFile)
 
-	var bsp BSP
+	var blockSpecimen BlockSpecimen
 
-	if err := json.Unmarshal(byteValue, &bsp); err != nil {
-		return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
-	}
+	err := json.Unmarshal(byteValue, &blockSpecimen)
+	fmt.Println(err)
+
+	// if err := json.Unmarshal(byteValue, &blockSpecimen); err != nil {
+	// 	return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
+	// }
+
+	fmt.Println(blockSpecimen.Header.Bloom)
 
 	return nil
 
