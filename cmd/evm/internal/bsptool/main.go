@@ -6,7 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	// "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/urfave/cli"
 )
 
@@ -51,16 +51,24 @@ func Main(ctx *cli.Context) error {
 	defer inFile.Close()
 	byteValue, _ := ioutil.ReadAll(inFile)
 
-	var blockSpecimen BlockSpecimen
+	var blockSpecimen types.BlockSpecimen
 
-	err := json.Unmarshal(byteValue, &blockSpecimen)
-	fmt.Println(err)
+	if err := json.Unmarshal(byteValue, &blockSpecimen); err != nil {
+		return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
+	}
 
-	// if err := json.Unmarshal(byteValue, &blockSpecimen); err != nil {
-	// 	return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
-	// }
+	fmt.Println(blockSpecimen.Transactions[0])
 
-	fmt.Println(blockSpecimen.Header.Bloom)
+	transactions, err := types.FatemeTxs(blockSpecimen.Transactions)
+	if err != nil {
+		fmt.Println("error")
+	}
+
+	block := types.NewBlock(types.FatemeHeader(blockSpecimen.Header),
+		transactions, types.FatemeUncles(blockSpecimen.Uncles),
+		types.FatemeReceipts(blockSpecimen.Receipts))
+
+	fmt.Println(block.Hash())
 
 	return nil
 
