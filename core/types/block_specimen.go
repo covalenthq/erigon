@@ -81,6 +81,7 @@ func FatemeTx(txST *BlockSpecimenTransaction) (Transaction, error) {
 	}
 	legacyTx := NewTransaction(uint64(txST.AccountNonce), *txST.Recipient, amount, uint64(txST.GasLimit),
 		price, txST.Payload) // no sender??
+	legacyTx.from.Store(txST.Sender)
 	return legacyTx, nil
 }
 
