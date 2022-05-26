@@ -41,8 +41,9 @@ docker-compose:
 	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+# TODO: remove this before upstream. just building evm currently as it's quicker
 dbg:
-	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
+	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/evm/...
 
 %.cmd: git-submodules
 	@# Note: $* is replaced by the command name
