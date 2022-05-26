@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/rlp"
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
@@ -218,6 +220,11 @@ func ExecuteBlockEphemerallyForBSC(
 	return receipts, nil
 }
 
+type rejectedTx struct {
+	Index int    `json:"index"`
+	Err   string `json:"error"`
+}
+
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
@@ -232,7 +239,7 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error), // transpiled evm (splitting evm codes into even lower level instructions)
-) (types.Receipts, *types.ReceiptForStorage, error) {
+) (types.Receipts, *types.ReceiptForStorage, *ExecutionResultFateme, error) {
 	//moskud: reads block from stateReader, runs it and writes the result to stateWriter
 	// InitializeBlockExecution: pretty much a no-op (suppose to set the epoch etc.)
 	// DaoHardFork state changes (modifies the state database - refunds to certain accounts)
@@ -253,11 +260,16 @@ func ExecuteBlockEphemerally(
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
 
+	var (
+		rejectedTxs []*rejectedTx
+		includedTxs types.Transactions
+	)
+
 	if !vmConfig.ReadOnly {
 		// moskud: perform block finalization
 		// for most consensus engines, Initialize is a no op (lol)
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
@@ -291,7 +303,10 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
+			// return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+		} else {
+			includedTxs = append(includedTxs, tx)
 		}
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
@@ -301,23 +316,23 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.ReceiptHash() {
-			return nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	if *usedGas != header.GasUsed {
-		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
 		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
-			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err //something that bothers me is these returns. It used to return when ever a trnasaction failed. So, maybe some of these returns are like that; can be replace with something else. Like we did with rejected transactions.
 		}
 	}
 
@@ -344,7 +359,34 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	return receipts, stateSyncReceipt, nil
+	execRs := &ExecutionResultFateme{
+		// StateRoot:   root,
+		TxRoot:      types.DeriveSha(includedTxs),
+		ReceiptRoot: types.DeriveSha(receipts),
+		Bloom:       types.CreateBloom(receipts),
+		LogsHash:    rlpHash(ibs.Logs()),
+		Receipts:    receipts,
+		Rejected:    rejectedTxs,
+	}
+
+	return receipts, stateSyncReceipt, execRs, nil
+}
+
+type ExecutionResultFateme struct {
+	// StateRoot   common.Hash    `json:"stateRoot"` I think we don't need this
+	TxRoot      common.Hash    `json:"txRoot"`
+	ReceiptRoot common.Hash    `json:"receiptRoot"`
+	LogsHash    common.Hash    `json:"logsHash"`
+	Bloom       types.Bloom    `json:"logsBloom"        gencodec:"required"`
+	Receipts    types.Receipts `json:"receipts"`
+	Rejected    []*rejectedTx  `json:"rejected,omitempty"`
+}
+
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewLegacyKeccak256()
+	rlp.Encode(hw, x) //nolint:errcheck
+	hw.Sum(h[:0])
+	return h
 }
 
 // SysCallContract moskud: calls the contract with the given message (data) and returns the data which the contract execution returned.
