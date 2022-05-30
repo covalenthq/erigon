@@ -57,6 +57,17 @@ const (
 // always print out progress. This avoids the user wondering what's going on.
 const statsReportLimit = 8 * time.Second
 
+type ExecutionResultNew struct {
+	// StateRoot   common.Hash    `json:"stateRoot"` I think we don't need this
+	TxRoot            common.Hash    `json:"txRoot"`
+	ReceiptRoot       common.Hash    `json:"receiptRoot"`
+	LogsHash          common.Hash    `json:"logsHash"`
+	Bloom             types.Bloom    `json:"logsBloom"        gencodec:"required"`
+	Receipts          types.Receipts `json:"receipts"`
+	Rejected          []*rejectedTx  `json:"rejected,omitempty"`
+	ReceiptForStorage *types.ReceiptForStorage
+}
+
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
 func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int, toCommit bool) {
@@ -239,7 +250,7 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error), // transpiled evm (splitting evm codes into even lower level instructions)
-) (types.Receipts, *types.ReceiptForStorage, *ExecutionResultFateme, error) {
+) (*ExecutionResultNew, error) {
 	//moskud: reads block from stateReader, runs it and writes the result to stateWriter
 	// InitializeBlockExecution: pretty much a no-op (suppose to set the epoch etc.)
 	// DaoHardFork state changes (modifies the state database - refunds to certain accounts)
@@ -269,7 +280,7 @@ func ExecuteBlockEphemerally(
 		// moskud: perform block finalization
 		// for most consensus engines, Initialize is a no op (lol)
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -316,23 +327,23 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.ReceiptHash() {
-			return nil, nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	if *usedGas != header.GasUsed {
-		return nil, nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
 		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
-			return nil, nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, nil, nil, err //something that bothers me is these returns. It used to return when ever a trnasaction failed. So, maybe some of these returns are like that; can be replace with something else. Like we did with rejected transactions.
+			return nil, err // todo: something that bothers me is these returns. It used to return when ever a trnasaction failed. So, maybe some of these returns are like that; can be replace with something else. Like we did with rejected transactions.
 		}
 	}
 
@@ -359,27 +370,19 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	execRs := &ExecutionResultFateme{
+	execRs := &ExecutionResultNew{
 		// StateRoot:   root,
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: types.DeriveSha(receipts),
-		Bloom:       types.CreateBloom(receipts),
-		LogsHash:    rlpHash(ibs.Logs()),
-		Receipts:    receipts,
-		Rejected:    rejectedTxs,
+		TxRoot:            types.DeriveSha(includedTxs),
+		ReceiptRoot:       types.DeriveSha(receipts),
+		Bloom:             types.CreateBloom(receipts),
+		LogsHash:          rlpHash(ibs.Logs()),
+		Receipts:          receipts,
+		Rejected:          rejectedTxs,
+		ReceiptForStorage: stateSyncReceipt,
 	}
 
-	return receipts, stateSyncReceipt, execRs, nil
-}
-
-type ExecutionResultFateme struct {
-	// StateRoot   common.Hash    `json:"stateRoot"` I think we don't need this
-	TxRoot      common.Hash    `json:"txRoot"`
-	ReceiptRoot common.Hash    `json:"receiptRoot"`
-	LogsHash    common.Hash    `json:"logsHash"`
-	Bloom       types.Bloom    `json:"logsBloom"        gencodec:"required"`
-	Receipts    types.Receipts `json:"receipts"`
-	Rejected    []*rejectedTx  `json:"rejected,omitempty"`
+	// return receipts, stateSyncReceipt, execRs, nil
+	return execRs, nil
 }
 
 func rlpHash(x interface{}) (h common.Hash) {
