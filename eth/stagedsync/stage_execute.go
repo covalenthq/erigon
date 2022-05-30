@@ -125,11 +125,14 @@ func executeBlock(
 
 	var receipts types.Receipts
 	var stateSyncReceipt *types.ReceiptForStorage
+	var execRs *core.ExecutionResultNew
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	if isPoSa {
 		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	} else {
-		receipts, stateSyncReceipt, _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		receipts = execRs.Receipts
+		stateSyncReceipt = execRs.ReceiptForStorage
 	}
 	if err != nil {
 		return err
