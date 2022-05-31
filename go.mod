@@ -20,7 +20,7 @@ require (
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
 	github.com/emirpasic/gods v1.12.0
-	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.3.0
