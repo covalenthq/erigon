@@ -126,7 +126,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash common.Hash) (vm.Tracer, error) {
+		getTracer = func(txIndex int, txHash common.Hash) (vm.Tracer, error) {//if we're not gonna change the StructLogger to accept file name, we don't need these inputs. Cuz these only indicate the name of the file
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -135,7 +135,9 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return vm.NewJSONLogger(logConfig, traceFile), nil
+			return vm.NewStructLogger(logConfig), nil // fateme's note: I copied this from blockchain.go from around 304. It doesn't handle writing to file cuz it's a StructLogger
+			//it was originally vm.NewStructLogger(&vm.LogConfig{}) in the blockchsin.go file. It was originally this in here:
+			//return vm.NewJSONLogger(logConfig, traceFile), nil
 		}
 	} else {
 		getTracer = func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error) {
@@ -283,7 +285,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true, getTracer)
 
 	if hashError != nil {
 		return fmt.Errorf("hash error on EBE: %w", err)
