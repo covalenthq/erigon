@@ -126,7 +126,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash common.Hash) (vm.Tracer, error) {//if we're not gonna change the StructLogger to accept file name, we don't need these inputs. Cuz these only indicate the name of the file
+		getTracer = func(txIndex int, txHash common.Hash) (vm.Tracer, error) { //if we're not gonna change the StructLogger to accept file name, we don't need these inputs. Cuz these only indicate the name of the file
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -135,7 +135,7 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return vm.NewStructLogger(logConfig), nil // fateme's note: I copied this from blockchain.go from around 304. It doesn't handle writing to file cuz it's a StructLogger
+			return vm.NewStructLogger(logConfig, traceFile), nil // fateme's note: I copied this from blockchain.go from around 304. It doesn't handle writing to file cuz it's a StructLogger
 			//it was originally vm.NewStructLogger(&vm.LogConfig{}) in the blockchsin.go file. It was originally this in here:
 			//return vm.NewJSONLogger(logConfig, traceFile), nil
 		}
