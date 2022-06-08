@@ -18,7 +18,6 @@ package vm
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -141,24 +140,18 @@ type StructLogger struct {
 	logs    []StructLog
 	output  []byte
 	err     error
-	encoder *json.Encoder
 }
 
 // NewStructLogger returns a new logger
-func NewStructLogger(cfg *LogConfig, writer io.Writer) *StructLogger {
+func NewStructLogger(cfg *LogConfig) *StructLogger {
 	logger := &StructLogger{
 		storage: make(map[common.Address]Storage),
 	}
 	if cfg != nil {
 		logger.cfg = *cfg
 	}
-	if writer != nil {
-		logger.encoder = json.NewEncoder(writer)
-	}
 	return logger
 }
-
-func (l *StructLogger) Encoder() *json.Encoder { return l.encoder }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *StructLogger) CaptureStart(evm *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) {
