@@ -256,8 +256,8 @@ func ExecuteBlockEphemerally(
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error), // transpiled evm (splitting evm codes into even lower level instructions)
 	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
-	getTracerFn func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error),
-	) (*EphemeralExecResult, error) {
+	getTracerFn func(txIndex int, txHash common.Hash) (tracer vm.FlushableTracer, err error),
+) (*EphemeralExecResult, error) {
 	//moskud: reads block from stateReader, runs it and writes the result to stateWriter
 	// InitializeBlockExecution: pretty much a no-op (suppose to set the epoch etc.)
 	// DaoHardFork state changes (modifies the state database - refunds to certain accounts)
@@ -310,18 +310,19 @@ func ExecuteBlockEphemerally(
 
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
-			if err1 != nil {
-				panic(err1)
-			}
-			encoder := json.NewEncoder(w) // fateme's note: StructLogger doesn't have a method to write into files. But, here it's been taken care of. So, I don't think we need to change StructLogger to handle streaming to files. But, we can talk about it.
-			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
+			vmConfig.Tracer.(vm.FlushableTracer).Flush(tx)
+			// w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
+			// if err1 != nil {
+			// 	panic(err1)
+			// }
+			// encoder := json.NewEncoder(w) // fateme's note: StructLogger doesn't have a method to write into files. But, here it's been taken care of. So, I don't think we need to change StructLogger to handle streaming to files. But, we can talk about it.
+			// logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+			// if err2 := encoder.Encode(logs); err2 != nil {
+			// 	panic(err2)
+			// }
+			// if err2 := w.Close(); err2 != nil {
+			// 	panic(err2)
+			// }
 			vmConfig.Tracer = nil
 		}
 		if err != nil {

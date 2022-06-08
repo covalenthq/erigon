@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type JSONLogger struct {
@@ -43,6 +44,8 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 
 func (l *JSONLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 }
+
+func (l *JSONLogger) Flush(tx types.Transaction) {}
 
 // CaptureState outputs state information on the logger.
 func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
