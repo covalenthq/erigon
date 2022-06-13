@@ -90,8 +90,7 @@ func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAllo
 			statedb.SetIncarnation(addr, 1)
 		}
 	}
-	// Commit and re-open to start with a clean state.
-	// moskud: waaat!?
+	//Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}
