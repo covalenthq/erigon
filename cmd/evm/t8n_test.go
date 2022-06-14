@@ -158,6 +158,14 @@ func TestT8n(t *testing.T) {
 			expOut: "exp.json",
 			output: t8nOutput{alloc: true, result: true},
 		},
+		{ // EIP-1559
+			base: "./testdata/10",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
 	} {
 
 		args := []string{"t8n"}
