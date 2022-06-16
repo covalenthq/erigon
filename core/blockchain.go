@@ -228,16 +228,16 @@ func ExecuteBlockEphemerallyForBSC(
 	receiptSha := types.DeriveSha(receipts)
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if newBlock.ReceiptHash() != block.ReceiptHash() {
+		if !statelessExec && newBlock.ReceiptHash() != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
 		}
 	}
-	if newBlock.GasUsed() != header.GasUsed {
+	if !statelessExec && newBlock.GasUsed() != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
 		bloom = newBlock.Bloom()
-		if newBlock.Bloom() != header.Bloom {
+		if !statelessExec && newBlock.Bloom() != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
 		}
 	}
@@ -248,16 +248,40 @@ func ExecuteBlockEphemerallyForBSC(
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
 
+	// these parts were not present before. So, maybe we don't need them?
+	var logs []*types.Log
+	for _, receipt := range receipts {
+		logs = append(logs, receipt.Logs...)
+	}
+
+	blockLogs := ibs.Logs()
+	var stateSyncReceipt *types.ReceiptForStorage
+	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
+		var stateSyncLogs []*types.Log
+		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
+
+		if len(blockLogs) > len(logs) {
+			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+
+			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
+
+			stateSyncReceipt = &types.ReceiptForStorage{
+				Status: types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:   stateSyncLogs,
+			}
+		}
+	}
+
 	execRs := &EphemeralExecResult{
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		// LogsHash:          rlpHash(blockLogs),
-		Receipts:   receipts,
-		Difficulty: (*math.HexOrDecimal256)(block.Header().Difficulty),
-		GasUsed:    math.HexOrDecimal64(*usedGas),
-		Rejected:   rejectedTxs,
-		// ReceiptForStorage: stateSyncReceipt,
+		TxRoot:            types.DeriveSha(includedTxs),
+		ReceiptRoot:       receiptSha,
+		Bloom:             bloom,
+		LogsHash:          rlpHash(blockLogs),
+		Receipts:          receipts,
+		Difficulty:        (*math.HexOrDecimal256)(block.Header().Difficulty),
+		GasUsed:           math.HexOrDecimal64(*usedGas),
+		Rejected:          rejectedTxs,
+		ReceiptForStorage: stateSyncReceipt,
 	}
 
 	return execRs, nil
