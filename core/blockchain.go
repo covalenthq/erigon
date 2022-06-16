@@ -348,7 +348,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, err // todo: something that bothers me is these returns. It used to return when ever a trnasaction failed. So, maybe some of these returns are like that; can be replace with something else. Like we did with rejected transactions.
+			return nil, err
 		}
 	}
 
