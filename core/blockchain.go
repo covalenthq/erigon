@@ -248,7 +248,6 @@ func ExecuteBlockEphemerallyForBSC(
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	// these parts were not present before. So, maybe we don't need them?
 	var logs []*types.Log
 	for _, receipt := range receipts {
 		logs = append(logs, receipt.Logs...)
@@ -392,7 +391,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, err // todo: something that bothers me is these returns. It used to return when ever a trnasaction failed. So, maybe some of these returns are like that; can be replace with something else. Like we did with rejected transactions.
+			return nil, err 
 		}
 	}
 
