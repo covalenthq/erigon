@@ -256,17 +256,15 @@ func ExecuteBlockEphemerallyForBSC(
 
 	blockLogs := ibs.Logs()
 	var stateSyncReceipt *types.ReceiptForStorage
-	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
+	if len(blockLogs) > 0 {
 		var stateSyncLogs []*types.Log
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
-			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-
-			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
+			stateSyncLogs = blockLogs[len(logs):]
 
 			stateSyncReceipt = &types.ReceiptForStorage{
-				Status: types.ReceiptStatusSuccessful, // make receipt status successful
+				Status: types.ReceiptStatusSuccessful,
 				Logs:   stateSyncLogs,
 			}
 		}
