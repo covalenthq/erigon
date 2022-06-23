@@ -123,7 +123,6 @@ func TestT8n(t *testing.T) {
 			input: t8nInput{
 				"alloc.json", "txs.json", "env.json", "Berlin",
 			},
-			output:      t8nOutput{alloc: true, result: true},
 			expExitCode: 4,
 		},
 		{ // Uncle test
@@ -164,6 +163,37 @@ func TestT8n(t *testing.T) {
 				"alloc.json", "txs.json", "env.json", "London",
 			},
 			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // missing base fees
+			base: "./testdata/11",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expExitCode: 3,
+		},
+		{ // EIP-1559 & gasCap
+			base: "./testdata/12",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // Difficulty calculation on London
+			base: "./testdata/19",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp_london.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // Difficulty calculation on arrow glacier
+			base: "./testdata/19",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "ArrowGlacier",
+			},
+			expOut: "exp_arrowglacier.json",
 			output: t8nOutput{alloc: true, result: true},
 		},
 	} {
