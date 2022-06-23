@@ -18,9 +18,7 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -127,7 +125,9 @@ func ExecuteBlockEphemerallyForBSC(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-) (types.Receipts, error) {
+	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
+	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+) (*EphemeralExecResult, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
@@ -136,6 +136,11 @@ func ExecuteBlockEphemerallyForBSC(
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
+
+	var (
+		rejectedTxs []*RejectedTx
+		includedTxs types.Transactions
+	)
 
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
@@ -161,31 +166,31 @@ func ExecuteBlockEphemerallyForBSC(
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
-			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			tracer, err := getTracer(i, tx.Hash())
+			if err != nil {
+				panic(err)
+			}
+			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
 
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
-			if err1 != nil {
-				panic(err1)
+			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
+				ftracer.Flush(tx)
 			}
-			encoder := json.NewEncoder(w)
-			logs := vm.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
+
 			vmConfig.Tracer = nil
 		}
-		if err != nil {
+		if err != nil && statelessExec {
+			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
+		} else if err != nil && !statelessExec {
 			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
-		}
-		if !vmConfig.NoReceipts {
-			receipts = append(receipts, receipt)
+		} else {
+			includedTxs = append(includedTxs, tx)
+			if !vmConfig.NoReceipts {
+				receipts = append(receipts, receipt)
+			}
 		}
 	}
 
@@ -218,16 +223,21 @@ func ExecuteBlockEphemerallyForBSC(
 		newBlock = block
 	}
 
+	var bloom types.Bloom
+
+	receiptSha := types.DeriveSha(receipts)
+
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if newBlock.ReceiptHash() != block.ReceiptHash() {
+		if !statelessExec && newBlock.ReceiptHash() != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
 		}
 	}
-	if newBlock.GasUsed() != header.GasUsed {
+	if !statelessExec && newBlock.GasUsed() != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
-		if newBlock.Bloom() != header.Bloom {
+		bloom = newBlock.Bloom()
+		if !statelessExec && newBlock.Bloom() != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
 		}
 	}
@@ -238,7 +248,40 @@ func ExecuteBlockEphemerallyForBSC(
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	return receipts, nil
+	var logs []*types.Log
+	for _, receipt := range receipts {
+		logs = append(logs, receipt.Logs...)
+	}
+
+	blockLogs := ibs.Logs()
+	var stateSyncReceipt *types.ReceiptForStorage
+	if len(blockLogs) > 0 {
+		var stateSyncLogs []*types.Log
+		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
+
+		if len(blockLogs) > len(logs) {
+			stateSyncLogs = blockLogs[len(logs):]
+
+			stateSyncReceipt = &types.ReceiptForStorage{
+				Status: types.ReceiptStatusSuccessful,
+				Logs:   stateSyncLogs,
+			}
+		}
+	}
+
+	execRs := &EphemeralExecResult{
+		TxRoot:            types.DeriveSha(includedTxs),
+		ReceiptRoot:       receiptSha,
+		Bloom:             bloom,
+		LogsHash:          rlpHash(blockLogs),
+		Receipts:          receipts,
+		Difficulty:        (*math.HexOrDecimal256)(block.Header().Difficulty),
+		GasUsed:           math.HexOrDecimal64(*usedGas),
+		Rejected:          rejectedTxs,
+		ReceiptForStorage: stateSyncReceipt,
+	}
+
+	return execRs, nil
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -348,7 +391,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, err
+			return nil, err 
 		}
 	}
 
