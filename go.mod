@@ -163,4 +163,7 @@ require (
 	modernc.org/token v1.0.0 // indirect
 )
 
-require gotest.tools/v3 v3.3.0 // indirect
+require (
+	github.com/ubiq/go-ubiq v3.0.1+incompatible
+	gotest.tools/v3 v3.3.0 // indirect
+)
