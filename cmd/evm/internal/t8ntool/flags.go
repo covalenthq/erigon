@@ -83,6 +83,11 @@ var (
 		Usage: "`stdin` or file name of where to find the transactions to apply.",
 		Value: "txs.json",
 	}
+	InputReplicaFlag = cli.StringFlag{
+		Name:  "input.replica",
+		Usage: "`stdin` or file name of where to find the block replica to apply (env, alloc, txs provided via other parameters are ignored).",
+		Value: "",
+	}
 	ChainIDFlag = cli.Int64Flag{
 		Name:  "state.chainid",
 		Usage: "ChainID to use",
