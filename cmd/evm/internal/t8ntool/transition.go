@@ -149,16 +149,40 @@ func Main(ctx *cli.Context) error {
 		txs      types.Transactions // txs to apply
 		allocStr = ctx.String(InputAllocFlag.Name)
 
-		envStr    = ctx.String(InputEnvFlag.Name)
-		txStr     = ctx.String(InputTxsFlag.Name)
-		inputData = &input{}
+		envStr               = ctx.String(InputEnvFlag.Name)
+		txStr                = ctx.String(InputTxsFlag.Name)
+		blockReplicaStr      = ctx.String(InputReplicaFlag.Name)
+		inputData            = &input{}
+		replica              = BlockReplica{}
+		replicaInputProvided = false
 	)
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
 		decoder.Decode(inputData) //nolint:errcheck
 	}
-	if allocStr != stdinSelector {
+
+	if len(blockReplicaStr) > 0 {
+		var decoder *json.Decoder
+		if blockReplicaStr == stdinSelector {
+			decoder = json.NewDecoder(os.Stdin)
+		} else {
+			inFile, err1 := os.Open(allocStr)
+			if err1 != nil {
+				return NewError(ErrorIO, fmt.Errorf("failed reading specimen file: %v", err1))
+			}
+			defer inFile.Close()
+			decoder = json.NewDecoder(inFile)
+		}
+
+		if err = decoder.Decode(&replica); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("error unmarshalling replica file: %v", err))
+		}
+
+		replicaInputProvided = true
+	}
+
+	if allocStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(allocStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
@@ -173,7 +197,7 @@ func Main(ctx *cli.Context) error {
 	prestate.Pre = inputData.Alloc
 
 	// Set the block environment
-	if envStr != stdinSelector {
+	if envStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(envStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err1))
@@ -205,7 +229,7 @@ func Main(ctx *cli.Context) error {
 	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
-	if txStr != stdinSelector {
+	if txStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(txStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
@@ -628,4 +652,18 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 
 	return &root, nil
+}
+
+func generateEvmInput(replica *BlockReplica, inp *input) {
+	inp.Env = &stEnv{
+		Coinbase:   libcommon.Address(replica.Header.Coinbase),
+		Difficulty: replica.Header.Difficulty,
+		//Random: replica.Header,
+		//ParentDifficulty: replica.TotalDifficulty,
+		GasLimit:  replica.Header.GasLimit,
+		Number:    replica.Header.Number.Uint64(),
+		Timestamp: replica.Header.Time,
+		//ParentTimestamp: ,
+
+	}
 }
