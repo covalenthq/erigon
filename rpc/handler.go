@@ -360,10 +360,10 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		resp := h.handleCall(ctx, msg, stream)
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.log.Trace("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.log.Trace("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
 					"err", resp.Error.Message)
 			}
 		}
