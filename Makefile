@@ -75,6 +75,9 @@ docker-compose: validate_docker_build_args
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
+evm-dbg:
+	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/evm/...
+
 %.cmd: git-submodules
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"

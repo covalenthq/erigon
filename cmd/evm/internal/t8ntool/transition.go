@@ -163,7 +163,7 @@ func Main(ctx *cli.Context) error {
 		if blockReplicaStr == stdinSelector {
 			decoder = json.NewDecoder(os.Stdin)
 		} else {
-			inFile, err1 := os.Open(allocStr)
+			inFile, err1 := os.Open(blockReplicaStr)
 			if err1 != nil {
 				return NewError(ErrorIO, fmt.Errorf("failed reading specimen file: %v", err1))
 			}
@@ -188,6 +188,16 @@ func Main(ctx *cli.Context) error {
 		if err = decoder.Decode(&inputData.Alloc); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
+	} else if replicaInputProvided {
+		Alloc := make(map[common.Address]core.GenesisAccount)
+		for _, accountRead := range replica.State.AccountRead {
+			Alloc[accountRead.Address] = core.GenesisAccount{
+				Balance: accountRead.Balance,
+				Nonce:   accountRead.Nonce,
+			}
+		}
+
+		inputData.Alloc = Alloc
 	}
 
 	prestate.Pre = inputData.Alloc
@@ -205,6 +215,9 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
 		}
 		inputData.Env = &env
+	} else if replicaInputProvided {
+		inputData.Env = &stEnv{}
+		inputData.Env.loadFromReplica(&replica)
 	}
 	prestate.Env = *inputData.Env
 
@@ -233,6 +246,16 @@ func Main(ctx *cli.Context) error {
 		decoder := json.NewDecoder(inFile)
 		if err = decoder.Decode(&txsWithKeys); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
+		}
+	} else if replicaInputProvided {
+		txsWithKeys = make([]*txWithKey, len(replica.Transactions))
+		for _, tx := range replica.Transactions {
+			amt, _ := uint256.FromBig(tx.Amount)
+			price, _ := uint256.FromBig(tx.Price)
+			legacyTx := types.NewTransaction(uint64(tx.AccountNonce), *tx.Recipient, amt, uint64(tx.GasLimit), price, tx.Payload)
+			txsWithKeys = append(txsWithKeys, &txWithKey{
+				tx: legacyTx, // TODO: legacyTx is not the only field that can come up here!
+			})
 		}
 	} else {
 		txsWithKeys = inputData.Txs
@@ -578,7 +601,7 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv, Eip1559 bool) *types.Header {
 	var header types.Header
-	header.UncleHash = env.ParentUncleHash
+	header.UncleHash = env.UncleHash
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.Number = big.NewInt(int64(env.Number))
@@ -636,18 +659,4 @@ func CalculateStateRoot(tx kv.RwTx) (*common.Hash, error) {
 	}
 
 	return &root, nil
-}
-
-func generateEvmInput(replica *BlockReplica, inp *input) {
-	inp.Env = &stEnv{
-		Coinbase:   common.Address(replica.Header.Coinbase),
-		Difficulty: replica.Header.Difficulty,
-		//Random: replica.Header,
-		//ParentDifficulty: replica.TotalDifficulty,
-		GasLimit:  replica.Header.GasLimit,
-		Number:    replica.Header.Number.Uint64(),
-		Timestamp: replica.Header.Time,
-		//ParentTimestamp: ,
-		
-	}
 }

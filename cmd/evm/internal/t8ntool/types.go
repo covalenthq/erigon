@@ -4,7 +4,7 @@ package t8ntool
 import (
 	"math/big"
 
-	"github.com/ubiq/go-ubiq/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
@@ -12,6 +12,8 @@ const (
 	BloomBitLength  = 8 * BloomByteLength
 )
 
+// BlockReplica it's actually the "block-specimen" portion of the block replica. Fields
+// like Receipts, senders are block-result-specific and won't actually be present in the input.
 type BlockReplica struct {
 	Type            string
 	NetworkId       uint64
@@ -25,9 +27,10 @@ type BlockReplica struct {
 	State           *StateSpecimen `json:"State"`
 }
 type StateSpecimen struct {
-	AccountRead []*accountRead
-	StorageRead []*storageRead
-	CodeRead    []*codeRead
+	AccountRead   []*AccountRead
+	StorageRead   []*StorageRead
+	CodeRead      []*CodeRead
+	BlockhashRead []*BlockhashRead
 }
 
 type BlockNonce [8]byte
@@ -84,20 +87,25 @@ type Receipt struct {
 	GasUsed           uint64
 }
 
-type accountRead struct {
+type AccountRead struct {
 	Address  common.Address
 	Nonce    uint64
 	Balance  *big.Int
 	CodeHash common.Hash
 }
 
-type storageRead struct {
+type StorageRead struct {
 	Account common.Address
 	SlotKey common.Hash
 	Value   common.Hash
 }
 
-type codeRead struct {
+type CodeRead struct {
 	Hash common.Hash
 	Code []byte
+}
+
+type BlockhashRead struct {
+	BlockNumber uint64
+	BlockHash   common.Hash
 }
