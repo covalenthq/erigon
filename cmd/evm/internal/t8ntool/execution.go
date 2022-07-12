@@ -73,7 +73,29 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
+func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
+	stEnv.Coinbase = replica.Header.Coinbase
+	stEnv.Difficulty = replica.Header.Difficulty
+	//stEnv.Random = replica  // TODO: will be added post merge
+	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided
+	stEnv.GasLimit = replica.Header.GasLimit
+	stEnv.Number = replica.Header.Number.Uint64()
+	stEnv.Timestamp = replica.Header.Time
+	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided
+	//stEnv.BlockHashes // TODO
+	stEnv.Ommers = make([]ommer, len(replica.Uncles))
+	for _, uncle := range replica.Uncles {
+		ommer := ommer{
+			Delta:   replica.Header.Number.Uint64() - uncle.Number.Uint64(),
+			Address: uncle.Coinbase,
+		}
+		stEnv.Ommers = append(stEnv.Ommers, ommer)
+	}
+	stEnv.BaseFee = replica.Header.BaseFee
+	stEnv.UncleHash = replica.Header.UncleHash
+}
+
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
 	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
