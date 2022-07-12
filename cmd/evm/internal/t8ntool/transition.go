@@ -169,7 +169,7 @@ func Main(ctx *cli.Context) error {
 		if blockReplicaStr == stdinSelector {
 			decoder = json.NewDecoder(os.Stdin)
 		} else {
-			inFile, err1 := os.Open(allocStr)
+			inFile, err1 := os.Open(blockReplicaStr)
 			if err1 != nil {
 				return NewError(ErrorIO, fmt.Errorf("failed reading specimen file: %v", err1))
 			}
@@ -194,6 +194,16 @@ func Main(ctx *cli.Context) error {
 		if err = decoder.Decode(&inputData.Alloc); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
+	} else if replicaInputProvided {
+		Alloc := make(map[libcommon.Address]types.GenesisAccount)
+		for _, accountRead := range replica.State.AccountRead {
+			Alloc[accountRead.Address] = types.GenesisAccount{
+				Balance: accountRead.Balance,
+				Nonce:   accountRead.Nonce,
+			}
+		}
+
+		inputData.Alloc = Alloc
 	}
 
 	prestate.Pre = inputData.Alloc
@@ -211,6 +221,9 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
 		}
 		inputData.Env = &env
+	} else if replicaInputProvided {
+		inputData.Env = &stEnv{}
+		inputData.Env.loadFromReplica(&replica)
 	}
 	prestate.Env = *inputData.Env
 
@@ -241,6 +254,16 @@ func Main(ctx *cli.Context) error {
 		if err = decoder.Decode(&txsWithKeys); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
+	} else if replicaInputProvided {
+		for _, tx := range replica.Transactions {
+			atx, err := adaptTransaction(tx)
+			if err != nil {
+				panic(err)
+			}
+			txsWithKeys = append(txsWithKeys, &txWithKey{
+				tx: atx,
+			})
+		}
 	} else {
 		txsWithKeys = inputData.Txs
 	}
@@ -262,7 +285,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -401,6 +424,88 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 	t.tx = tx
 	return nil
+}
+
+func adaptTransaction(tx *Transaction) (types.Transaction, error) {
+	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
+	var chainId *uint256.Int
+	var overflow bool
+	if tx.ChainId != nil {
+		chainId, overflow = uint256.FromBig((*big.Int)(tx.ChainId))
+		if overflow {
+			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+		}
+	}
+
+	if tx.Amount != nil {
+		value, overflow = uint256.FromBig((*big.Int)(tx.Amount))
+		if overflow {
+			return nil, fmt.Errorf("value field caused an overflow (uint256)")
+		}
+	}
+
+	if tx.Price != nil {
+		gasPrice, overflow = uint256.FromBig((*big.Int)(tx.Price))
+		if overflow {
+			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
+		}
+	}
+	switch tx.Type {
+	case types.LegacyTxType, types.AccessListTxType:
+		toAddr := libcommon.Address{}
+		legacyTx := types.NewTransaction(uint64(tx.AccountNonce), toAddr, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+		legacyTx.CommonTx.SetFrom(tx.Sender)
+
+		if tx.Type == types.AccessListTxType {
+			accessListTx := types.AccessListTx{
+				LegacyTx:   *legacyTx,
+				ChainID:    chainId,
+				AccessList: tx.AccessList,
+			}
+
+			return &accessListTx, nil
+		} else {
+			return legacyTx, nil
+		}
+
+	case types.DynamicFeeTxType:
+		var tip *uint256.Int
+		var feeCap *uint256.Int
+		if tx.GasTipCap != nil {
+			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		if tx.GasFeeCap != nil {
+			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		dynamicFeeTx := types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce: uint64(tx.AccountNonce),
+				To:    tx.Recipient,
+				Value: value,
+				Gas:   uint64(tx.GasLimit),
+				Data:  tx.Payload,
+			},
+			ChainID:    chainId,
+			Tip:        tip,
+			FeeCap:     feeCap,
+			AccessList: tx.AccessList,
+		}
+
+		dynamicFeeTx.CommonTx.SetFrom(tx.Sender)
+		return &dynamicFeeTx, nil
+
+	default:
+		return nil, nil
+
+	}
 }
 
 func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
@@ -611,6 +716,7 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv) *types.Header {
 	var header types.Header
+	header.UncleHash = env.UncleHash
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.GasLimit = env.GasLimit

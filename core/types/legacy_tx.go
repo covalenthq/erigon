@@ -44,6 +44,10 @@ type CommonTx struct {
 	V, R, S uint256.Int        // signature values
 }
 
+func (ct *CommonTx) SetFrom(from libcommon.Address) {
+	ct.from.Store(from)
+}
+
 func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
