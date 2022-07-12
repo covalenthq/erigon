@@ -56,6 +56,7 @@ type stEnv struct {
 	Ommers           []ommer                             `json:"ommers,omitempty"`
 	BaseFee          *big.Int                            `json:"currentBaseFee,omitempty"`
 	ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
+	UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
 }
 
 type stEnvMarshaling struct {
@@ -68,6 +69,28 @@ type stEnvMarshaling struct {
 	Timestamp        math.HexOrDecimal64
 	ParentTimestamp  math.HexOrDecimal64
 	BaseFee          *math.HexOrDecimal256
+}
+
+func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
+	stEnv.Coinbase = replica.Header.Coinbase
+	stEnv.Difficulty = replica.Header.Difficulty
+	//stEnv.Random = replica  // TODO: will be added post merge
+	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided
+	stEnv.GasLimit = replica.Header.GasLimit
+	stEnv.Number = replica.Header.Number.Uint64()
+	stEnv.Timestamp = replica.Header.Time
+	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided
+	//stEnv.BlockHashes // TODO
+	stEnv.Ommers = make([]ommer, len(replica.Uncles))
+	for _, uncle := range replica.Uncles {
+		ommer := ommer{
+			Delta:   replica.Header.Number.Uint64() - uncle.Number.Uint64(),
+			Address: uncle.Coinbase,
+		}
+		stEnv.Ommers = append(stEnv.Ommers, ommer)
+	}
+	stEnv.BaseFee = replica.Header.BaseFee
+	stEnv.UncleHash = replica.Header.UncleHash
 }
 
 func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
