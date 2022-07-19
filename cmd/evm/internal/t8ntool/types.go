@@ -2,8 +2,6 @@
 package t8ntool
 
 import (
-	"math/big"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -19,7 +17,7 @@ type BlockReplica struct {
 	Type            string
 	NetworkId       uint64
 	Hash            common.Hash
-	TotalDifficulty *big.Int
+	TotalDifficulty *BigInt
 	Header          *Header
 	Transactions    []*Transaction
 	Uncles          []*Header `json:"uncles"`
@@ -46,29 +44,29 @@ type Header struct {
 	TxHash      common.Hash    `json:"transactionsRoot"`
 	ReceiptHash common.Hash    `json:"receiptsRoot"`
 	Bloom       Bloom          `json:"logsBloom"`
-	Difficulty  *big.Int       `json:"difficulty"`
-	Number      *big.Int       `json:"number"`
+	Difficulty  *BigInt        `json:"difficulty"`
+	Number      *BigInt        `json:"number"`
 	GasLimit    uint64         `json:"gasLimit"`
 	GasUsed     uint64         `json:"gasUsed"`
 	Time        uint64         `json:"timestamp"`
 	Extra       []byte         `json:"extraData"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
-	BaseFee     *big.Int       `json:"baseFeePerGas"`
+	BaseFee     *BigInt        `json:"baseFeePerGas"`
 }
 
 type Transaction struct {
 	Type         byte             `json:"type"`
 	AccessList   types.AccessList `json:"accessList"`
-	ChainId      *big.Int         `json:"chainId"`
+	ChainId      *BigInt          `json:"chainId"`
 	AccountNonce uint64           `json:"nonce"`
-	Price        *big.Int         `json:"gasPrice"`
+	Price        *BigInt          `json:"gasPrice"`
 	GasLimit     uint64           `json:"gas"`
-	GasTipCap    *big.Int         `json:"gasTipCap"`
-	GasFeeCap    *big.Int         `json:"gasFeeCap"`
+	GasTipCap    *BigInt          `json:"gasTipCap"`
+	GasFeeCap    *BigInt          `json:"gasFeeCap"`
 	Sender       common.Address   `json:"from"`
 	Recipient    *common.Address  `json:"to" rlp:"nil"` // nil means contract creation
-	Amount       *big.Int         `json:"value"`
+	Amount       *BigInt          `json:"value"`
 	Payload      []byte           `json:"input"`
 }
 
@@ -96,7 +94,7 @@ type Receipt struct {
 type AccountRead struct {
 	Address  common.Address
 	Nonce    uint64
-	Balance  *big.Int
+	Balance  *BigInt
 	CodeHash common.Hash
 }
 

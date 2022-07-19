@@ -21,11 +21,11 @@ require (
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
-	github.com/consensys/gnark-crypto v0.4.0
+	github.com/consensys/gnark-crypto v0.4.1-0.20210426202927-39ac3d4b3f1f
 	github.com/crate-crypto/go-ipa v0.0.0-20220523130400-f11357ae11c7
 	github.com/davecgh/go-spew v1.1.1
-	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
+	github.com/deckarep/golang-set v1.8.0
+	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
@@ -173,4 +173,4 @@ require (
 	modernc.org/token v1.0.0 // indirect
 )
 
-require github.com/ubiq/go-ubiq v3.0.1+incompatible
+require github.com/ethereum/go-ethereum v1.10.20
