@@ -271,3 +271,5 @@ require (
 )
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+
+require github.com/ethereum/go-ethereum v1.10.20
