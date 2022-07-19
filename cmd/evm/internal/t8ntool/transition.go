@@ -31,11 +31,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ubiq/go-ubiq/common/hexutil"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -155,7 +155,7 @@ func Main(ctx *cli.Context) error {
 		txStr                = ctx.String(InputTxsFlag.Name)
 		blockReplicaStr      = ctx.String(InputReplicaFlag.Name)
 		inputData            = &input{}
-		replica              = BlockReplica{}
+		inputReplica         = BlockReplica{}
 		replicaInputProvided = false
 	)
 	// Figure out the prestate alloc
@@ -177,7 +177,7 @@ func Main(ctx *cli.Context) error {
 			decoder = json.NewDecoder(inFile)
 		}
 
-		if err = decoder.Decode(&replica); err != nil {
+		if err = decoder.Decode(&inputReplica); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("error unmarshalling replica file: %v", err))
 		}
 
@@ -196,10 +196,26 @@ func Main(ctx *cli.Context) error {
 		}
 	} else if replicaInputProvided {
 		Alloc := make(map[libcommon.Address]types.GenesisAccount)
-		for _, accountRead := range replica.State.AccountRead {
+		Storage := make(map[libcommon.Address]map[libcommon.Hash]libcommon.Hash)
+		Code := make(map[libcommon.Hash][]byte)
+		var ok bool
+		for _, storageRead := range inputReplica.State.StorageRead {
+			if _, ok = Storage[storageRead.Account]; !ok {
+				Storage[storageRead.Account] = make(map[libcommon.Hash]libcommon.Hash)
+			}
+			Storage[storageRead.Account][storageRead.SlotKey] = storageRead.Value
+		}
+
+		for _, codeRead := range inputReplica.State.CodeRead {
+			Code[codeRead.Hash] = codeRead.Code
+		}
+
+		for _, accountRead := range inputReplica.State.AccountRead {
 			Alloc[accountRead.Address] = types.GenesisAccount{
-				Balance: accountRead.Balance,
+				Balance: accountRead.Balance.Int,
+				Storage: Storage[accountRead.Address],
 				Nonce:   accountRead.Nonce,
+				Code:    Code[accountRead.CodeHash],
 			}
 		}
 
@@ -223,7 +239,7 @@ func Main(ctx *cli.Context) error {
 		inputData.Env = &env
 	} else if replicaInputProvided {
 		inputData.Env = &stEnv{}
-		inputData.Env.loadFromReplica(&replica)
+		inputData.Env.loadFromReplica(&inputReplica)
 	}
 	prestate.Env = *inputData.Env
 
@@ -255,7 +271,7 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
 	} else if replicaInputProvided {
-		for _, tx := range replica.Transactions {
+		for _, tx := range inputReplica.Transactions {
 			atx, err := adaptTransaction(tx)
 			if err != nil {
 				panic(err)
@@ -382,7 +398,7 @@ func Main(ctx *cli.Context) error {
 	}
 	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
-	return dispatchOutput(ctx, baseDir, result, collector, body)
+	return dispatchOutput(true, ctx, baseDir, result, collector, body)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -431,21 +447,21 @@ func adaptTransaction(tx *Transaction) (types.Transaction, error) {
 	var chainId *uint256.Int
 	var overflow bool
 	if tx.ChainId != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(tx.ChainId))
+		chainId, overflow = uint256.FromBig((*big.Int)(tx.ChainId.Int))
 		if overflow {
 			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
 		}
 	}
 
 	if tx.Amount != nil {
-		value, overflow = uint256.FromBig((*big.Int)(tx.Amount))
+		value, overflow = uint256.FromBig((*big.Int)(tx.Amount.Int))
 		if overflow {
 			return nil, fmt.Errorf("value field caused an overflow (uint256)")
 		}
 	}
 
 	if tx.Price != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(tx.Price))
+		gasPrice, overflow = uint256.FromBig((*big.Int)(tx.Price.Int))
 		if overflow {
 			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
 		}
@@ -472,14 +488,14 @@ func adaptTransaction(tx *Transaction) (types.Transaction, error) {
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if tx.GasTipCap != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap))
+			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
 			if overflow {
 				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
 			}
 		}
 
 		if tx.GasFeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap))
+			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
 			if overflow {
 				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
 			}
@@ -670,7 +686,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutility.Bytes) error {
+func dispatchOutput(blockResult bool, ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {
@@ -777,18 +793,4 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 
 	return &root, nil
-}
-
-func generateEvmInput(replica *BlockReplica, inp *input) {
-	inp.Env = &stEnv{
-		Coinbase:   libcommon.Address(replica.Header.Coinbase),
-		Difficulty: replica.Header.Difficulty,
-		//Random: replica.Header,
-		//ParentDifficulty: replica.TotalDifficulty,
-		GasLimit:  replica.Header.GasLimit,
-		Number:    replica.Header.Number.Uint64(),
-		Timestamp: replica.Header.Time,
-		//ParentTimestamp: ,
-
-	}
 }
