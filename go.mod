@@ -12,10 +12,10 @@ require (
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
-	github.com/consensys/gnark-crypto v0.4.0
+	github.com/consensys/gnark-crypto v0.4.1-0.20210426202927-39ac3d4b3f1f
 	github.com/davecgh/go-spew v1.1.1
-	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
+	github.com/deckarep/golang-set v1.8.0
+	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
@@ -145,10 +145,10 @@ require (
 	github.com/valyala/histogram v1.2.0 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
-	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
+	golang.org/x/net v0.0.0-20220607020251-c690dde0001d // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/tools v0.1.10 // indirect
-	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
+	golang.org/x/xerrors v0.0.0-20220517211312-f3a8303e98df // indirect
 	google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -164,6 +164,6 @@ require (
 )
 
 require (
-	github.com/ubiq/go-ubiq v3.0.1+incompatible
+	github.com/ethereum/go-ethereum v1.10.20
 	gotest.tools/v3 v3.3.0 // indirect
 )

@@ -497,3 +497,6 @@ func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }
+func (m *Message) SetCheckNonce(checkNonce bool) {
+	m.checkNonce = checkNonce
+}
