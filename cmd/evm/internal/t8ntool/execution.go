@@ -75,14 +75,14 @@ type stEnvMarshaling struct {
 
 func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	stEnv.Coinbase = replica.Header.Coinbase
-	stEnv.Difficulty = replica.Header.Difficulty
-	//stEnv.Random = replica  // TODO: will be added post merge
-	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided
+	stEnv.Difficulty = replica.Header.Difficulty.Int
 	stEnv.GasLimit = replica.Header.GasLimit
 	stEnv.Number = replica.Header.Number.Uint64()
 	stEnv.Timestamp = replica.Header.Time
-	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided
-	//stEnv.BlockHashes // TODO
+	stEnv.BlockHashes = make(map[math.HexOrDecimal64]libcommon.Hash)
+	for _, blockhash := range replica.State.BlockhashRead {
+		stEnv.BlockHashes[math.HexOrDecimal64(blockhash.BlockNumber)] = blockhash.BlockHash
+	}
 	stEnv.Ommers = make([]ommer, len(replica.Uncles))
 	for _, uncle := range replica.Uncles {
 		ommer := ommer{
@@ -91,7 +91,7 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 		}
 		stEnv.Ommers = append(stEnv.Ommers, ommer)
 	}
-	stEnv.BaseFee = replica.Header.BaseFee
+	stEnv.BaseFee = replica.Header.BaseFee.Int
 	stEnv.UncleHash = replica.Header.UncleHash
 }
 
@@ -117,6 +117,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAllo
 			tx.Put(kv.IncarnationMap, addr[:], b[:])
 		}
 	}
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
 		panic(err)
