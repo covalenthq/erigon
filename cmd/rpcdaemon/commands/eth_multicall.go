@@ -11,7 +11,6 @@ import (
   "github.com/ledgerwatch/erigon/common/hexutil"
   "github.com/ledgerwatch/erigon/common/math"
   "github.com/ledgerwatch/erigon/core"
-  "github.com/ledgerwatch/erigon/core/rawdb"
   "github.com/ledgerwatch/erigon/core/state"
   "github.com/ledgerwatch/erigon/core/vm"
   "github.com/ledgerwatch/erigon/ethdb"
@@ -50,20 +49,19 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
     return nil, err
   }
 
-  var baseFee *uint256.Int
-  if blockNrOrHash == nil {
-    var num = rpc.LatestBlockNumber
-    blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
-  }
-  blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(*blockNrOrHash, dbtx, api.filters)
+  blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(*blockNrOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
   if err != nil {
     return nil, err
   }
-  blockHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
-  if blockHeader == nil {
-    return nil, fmt.Errorf("block header %d(%x) not found", blockNumber, hash)
+  block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
+  if err != nil {
+    return nil, err
   }
-  if blockHeader != nil && blockHeader.BaseFee != nil {
+
+  blockHeader := block.Header()
+
+  var baseFee *uint256.Int
+  if blockHeader.BaseFee != nil {
     var overflow bool
     baseFee, overflow = uint256.FromBig(blockHeader.BaseFee)
     if overflow {
