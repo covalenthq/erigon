@@ -64,10 +64,13 @@ type Transaction struct {
 	GasLimit     uint64           `json:"gas"`
 	GasTipCap    *BigInt          `json:"gasTipCap"`
 	GasFeeCap    *BigInt          `json:"gasFeeCap"`
-	Sender       common.Address   `json:"from"`
+	Sender       *common.Address  `json:"from"`
 	Recipient    *common.Address  `json:"to" rlp:"nil"` // nil means contract creation
 	Amount       *BigInt          `json:"value"`
 	Payload      []byte           `json:"input"`
+	V            *BigInt          `json:"v"`
+	R            *BigInt          `json:"r"`
+	S            *BigInt          `json:"s"`
 }
 
 type Logs struct {

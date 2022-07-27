@@ -437,9 +437,14 @@ func adaptTransaction(tx *Transaction) (types.Transaction, error) {
 	}
 	switch tx.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr common.Address = common.Address{}
+		var toAddr common.Address = *tx.Recipient
 		legacyTx := types.NewTransaction(uint64(tx.AccountNonce), toAddr, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
-		legacyTx.CommonTx.SetFrom(tx.Sender)
+		if tx.Sender != nil {
+			legacyTx.CommonTx.SetFrom(*tx.Sender)
+		}
+
+		setSignatureValues(&legacyTx.CommonTx, tx.V, tx.R, tx.S)
+
 		legacyTx.CommonTx.ChainID = chainId
 
 		if tx.Type == types.AccessListTxType {
@@ -485,13 +490,47 @@ func adaptTransaction(tx *Transaction) (types.Transaction, error) {
 			AccessList: tx.AccessList,
 		}
 
-		dynamicFeeTx.CommonTx.SetFrom(tx.Sender)
+		if tx.Sender != nil {
+			dynamicFeeTx.CommonTx.SetFrom(*tx.Sender)
+		}
+		setSignatureValues(&dynamicFeeTx.CommonTx, tx.V, tx.R, tx.S)
 		return &dynamicFeeTx, nil
 
 	default:
 		return nil, nil
 
 	}
+}
+
+func setSignatureValues(tx *types.CommonTx, V, R, S *BigInt) error {
+	if V != nil {
+		value, overflow := uint256.FromBig((*big.Int)(V.Int))
+		if overflow {
+			return fmt.Errorf("value field caused an overflow (uint256)")
+		}
+
+		tx.V = *value
+	}
+
+	if R != nil {
+		value, overflow := uint256.FromBig((*big.Int)(R.Int))
+		if overflow {
+			return fmt.Errorf("value field caused an overflow (uint256)")
+		}
+
+		tx.R = *value
+	}
+
+	if S != nil {
+		value, overflow := uint256.FromBig((*big.Int)(S.Int))
+		if overflow {
+			return fmt.Errorf("value field caused an overflow (uint256)")
+		}
+
+		tx.S = *value
+	}
+
+	return nil
 }
 
 func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
