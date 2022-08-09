@@ -266,7 +266,7 @@ func Main(ctx *cli.Context) error {
 		}
 	} else if replicaInputProvided {
 		for _, tx := range inputReplica.Transactions {
-			atx, err := adaptTransaction(tx)
+			atx, err := tx.adaptTransaction()
 			if err != nil {
 				panic(err)
 			}
@@ -282,6 +282,11 @@ func Main(ctx *cli.Context) error {
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
+	}
+	if replicaInputProvided {
+		for i, tx := range txs {
+			tx.SetSender(inputReplica.Senders[i]) // avoid sender recovery (expensive) by using cached senders
+		}
 	}
 
 	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
@@ -367,7 +372,35 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
-	return dispatchOutput(true, ctx, baseDir, result, collector, body)
+
+	var blockResult BlockReplica
+
+	if len(ctx.String(OutputBlockResultFlag.Name)) != 0 {
+		new_transactions, err := convertTransactions(txs)
+		if err != nil {
+			return err
+		}
+
+		adapted_header, err := adaptHeader(header)
+		if err != nil {
+			return err
+		}
+		blockResult = BlockReplica{
+			Type:            "block-result",
+			NetworkId:       chainConfig.ChainID.Uint64(),
+			Hash:            result.StateRoot,
+			TotalDifficulty: inputReplica.TotalDifficulty, // note: check
+			Header:          adapted_header,
+			Transactions:    new_transactions,
+			Uncles:          converUncles(ommerHeaders),
+			Receipts:        convertReceipts(result.Receipts),
+			Senders:         inputReplica.Senders, // avoid sender recovery (expensive) by using cached senders
+		}
+
+		//fmt.Println(exportBlockReplica) // should use dispatch output for this.s
+	}
+
+	return dispatchOutput(ctx, baseDir, result, collector, body, blockResult)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -408,128 +441,6 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	t.tx = tx
-	return nil
-}
-
-func adaptTransaction(tx *Transaction) (types.Transaction, error) {
-	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
-	var chainId *uint256.Int
-	var overflow bool
-	if tx.ChainId != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(tx.ChainId.Int))
-		if overflow {
-			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
-		}
-	}
-
-	if tx.Amount != nil {
-		value, overflow = uint256.FromBig((*big.Int)(tx.Amount.Int))
-		if overflow {
-			return nil, fmt.Errorf("value field caused an overflow (uint256)")
-		}
-	}
-
-	if tx.Price != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(tx.Price.Int))
-		if overflow {
-			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
-		}
-	}
-	switch tx.Type {
-	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr common.Address = *tx.Recipient
-		legacyTx := types.NewTransaction(uint64(tx.AccountNonce), toAddr, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
-		if tx.Sender != nil {
-			legacyTx.CommonTx.SetFrom(*tx.Sender)
-		}
-
-		setSignatureValues(&legacyTx.CommonTx, tx.V, tx.R, tx.S)
-
-		legacyTx.CommonTx.ChainID = chainId
-
-		if tx.Type == types.AccessListTxType {
-			accessListTx := types.AccessListTx{
-				LegacyTx:   *legacyTx,
-				ChainID:    chainId,
-				AccessList: tx.AccessList,
-			}
-
-			return &accessListTx, nil
-		} else {
-			return legacyTx, nil
-		}
-
-	case types.DynamicFeeTxType:
-		var tip *uint256.Int
-		var feeCap *uint256.Int
-		if tx.GasTipCap != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
-			if overflow {
-				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
-			}
-		}
-
-		if tx.GasFeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
-			if overflow {
-				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
-			}
-		}
-
-		dynamicFeeTx := types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				ChainID: chainId,
-				Nonce:   uint64(tx.AccountNonce),
-				To:      tx.Recipient,
-				Value:   value,
-				Gas:     uint64(tx.GasLimit),
-				Data:    tx.Payload,
-			},
-			Tip:        tip,
-			FeeCap:     feeCap,
-			AccessList: tx.AccessList,
-		}
-
-		if tx.Sender != nil {
-			dynamicFeeTx.CommonTx.SetFrom(*tx.Sender)
-		}
-		setSignatureValues(&dynamicFeeTx.CommonTx, tx.V, tx.R, tx.S)
-		return &dynamicFeeTx, nil
-
-	default:
-		return nil, nil
-
-	}
-}
-
-func setSignatureValues(tx *types.CommonTx, V, R, S *BigInt) error {
-	if V != nil {
-		value, overflow := uint256.FromBig((*big.Int)(V.Int))
-		if overflow {
-			return fmt.Errorf("value field caused an overflow (uint256)")
-		}
-
-		tx.V = *value
-	}
-
-	if R != nil {
-		value, overflow := uint256.FromBig((*big.Int)(R.Int))
-		if overflow {
-			return fmt.Errorf("value field caused an overflow (uint256)")
-		}
-
-		tx.R = *value
-	}
-
-	if S != nil {
-		value, overflow := uint256.FromBig((*big.Int)(S.Int))
-		if overflow {
-			return fmt.Errorf("value field caused an overflow (uint256)")
-		}
-
-		tx.S = *value
-	}
-
 	return nil
 }
 
@@ -694,7 +605,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(blockResult bool, ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes, blockResult BlockReplica) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {
@@ -720,6 +631,11 @@ func dispatchOutput(blockResult bool, ctx *cli.Context, baseDir string, result *
 	}
 	if err := dispatch(baseDir, ctx.String(OutputBodyFlag.Name), "body", body); err != nil {
 		return err
+	}
+	if blockResultOut := OutputBlockResultFlag.Name; len(blockResultOut) != 0 {
+		if err := dispatch(baseDir, blockResultOut, "block_result", blockResult); err != nil {
+			return err
+		}
 	}
 	if len(stdOutObject) > 0 {
 		b, err := json.MarshalIndent(stdOutObject, "", " ")
