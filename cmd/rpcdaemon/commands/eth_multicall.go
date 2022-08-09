@@ -32,7 +32,7 @@ type MulticallExecutionResult struct {
 }
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArgs, contractsWithPayloads MulticallRunlist, blockNrOrHash *rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (MulticallResult, error) {
+func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArgs, contractsWithPayloads MulticallRunlist, number rpc.BlockNumber, overrides *map[common.Address]ethapi.Account) (MulticallResult, error) {
   startTime := time.Now()
 
   // result stores
@@ -49,11 +49,13 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
     return nil, err
   }
 
-  blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(*blockNrOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+  blockNrOrHash := rpc.BlockNumberOrHashWithNumber(number)
+
+  blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
   if err != nil {
     return nil, err
   }
-  block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
+  block, err := api.BaseAPI.blockByNumberWithSenders(dbtx, blockNumber)
   if err != nil {
     return nil, err
   }
@@ -70,7 +72,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   }
 
   var stateReader state.StateReader
-  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, *blockNrOrHash, api.filters, api.stateCache)
+  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache)
   if err != nil {
     return nil, err
   }
