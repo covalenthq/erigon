@@ -68,6 +68,14 @@ var (
 			"\t<file> - into the file <file> ",
 		Value: "result.json",
 	}
+	OutputBlockResultFlag = cli.StringFlag{
+		Name: "output.blockresult",
+		Usage: "If set, 'block results' will be output here.\n" +
+			"\t`stdout` - into the stdout output\n" +
+			"\t`stderr` - into the stderr output\n" +
+			"\t<file> - into the file <file> ",
+		Value: "",
+	}
 	InputAllocFlag = cli.StringFlag{
 		Name:  "input.alloc",
 		Usage: "`stdin` or file name of where to find the prestate alloc to use.",

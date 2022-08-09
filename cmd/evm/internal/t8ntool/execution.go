@@ -91,6 +91,9 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	}
 	stEnv.BaseFee = replica.Header.BaseFee.Int
 	stEnv.UncleHash = replica.Header.UncleHash
+	//stEnv.Random = replica  // TODO: will be added post merge
+	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided (and it IS provided)
+	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided (and it IS provided)
 }
 
 func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
