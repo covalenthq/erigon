@@ -13,7 +13,6 @@ import (
   "github.com/ledgerwatch/erigon/core"
   "github.com/ledgerwatch/erigon/core/state"
   "github.com/ledgerwatch/erigon/core/vm"
-  "github.com/ledgerwatch/erigon/ethdb"
   "github.com/ledgerwatch/erigon/internal/ethapi"
   "github.com/ledgerwatch/erigon/rpc"
   "github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -102,8 +101,6 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   ibs := state.New(stateReader)
   var execSeq int
 
-  contractHasTEVM := ethdb.GetHasTEVM(dbtx)
-
   for contractAddr, payloads := range contractsWithPayloads {
     callArgsBuf.To = &contractAddr
 
@@ -121,7 +118,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
-      blockCtx, txCtx := transactions.GetEvmContext(msg, blockHeader, blockNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
+      blockCtx, txCtx := transactions.GetEvmContext(msg, blockHeader, blockNrOrHash.RequireCanonical, dbtx, api._blockReader)
       blockCtx.GasLimit = math.MaxUint64
       blockCtx.MaxGasLimit = true
 
