@@ -71,7 +71,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   }
 
   var stateReader state.StateReader
-  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache)
+  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg, api._txNums)
   if err != nil {
     return nil, err
   }
