@@ -71,7 +71,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   }
 
   var stateReader state.StateReader
-  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg, api._txNums)
+  stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg)
   if err != nil {
     return nil, err
   }
@@ -81,8 +81,8 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   // Setup context so it may be cancelled the call has completed
   // or, in case of unmetered gas, setup a context with a timeout.
   var cancel context.CancelFunc
-  if callTimeout > 0 {
-    ctx, cancel = context.WithTimeout(ctx, callTimeout)
+  if api.evmCallTimeout > 0 {
+    ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
   } else {
     ctx, cancel = context.WithCancel(ctx)
   }
