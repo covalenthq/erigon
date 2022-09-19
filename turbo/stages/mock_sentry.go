@@ -358,6 +358,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.BatchSize,
 				false,
 				false,
+				0,
+				nil,
 				allSnapshots,
 				blockReader,
 				dirs.Tmp,

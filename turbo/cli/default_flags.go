@@ -45,6 +45,8 @@ var DefaultFlags = []cli.Flag{
 	StateStreamDisableFlag,
 	SyncLoopThrottleFlag,
 	BadBlockFlag,
+	HeadersStageInsertLimitFlag,
+	IgnoreHeadersAboveHeightFlag,
 
 	utils.HTTPEnabledFlag,
 	utils.HTTPListenAddrFlag,
