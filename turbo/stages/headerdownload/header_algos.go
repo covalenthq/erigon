@@ -500,6 +500,16 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 	return hd.engine.VerifyHeader(hd.consensusHeaderReader, header, true /* seal */)
 }
 
+func (hd *HeaderDownload) SetInsertLimit(numHeaders int64) {
+	hd.insertLimit = numHeaders
+	hd.insertsLeft = numHeaders
+}
+
+func (hd *HeaderDownload) SetIgnoreAboveHeight(blockNum uint64) bool {
+	hd.ignoreAboveHeight = &blockNum
+	return hd.highestInDb >= blockNum
+}
+
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
 func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
@@ -522,6 +532,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			log.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
+		if hd.ignoreAboveHeight != nil && link.blockHeight > *hd.ignoreAboveHeight {
+			return false, true, 0, lastTime, nil
+		}
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
@@ -537,6 +550,12 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return true, false, 0, lastTime, nil
 				}
 			}
+		}
+		if hd.insertLimit > 0 {
+			if hd.insertsLeft <= 0 {
+				return false, true, 0, lastTime, nil
+			}
+			hd.insertsLeft--
 		}
 		link.verified = true
 		// Make sure long insertions do not appear as a stuck stage 1

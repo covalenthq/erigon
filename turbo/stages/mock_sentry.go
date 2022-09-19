@@ -390,6 +390,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				penalize,
 				cfg.BatchSize,
 				false,
+				0,
+				nil,
 				mock.BlockSnapshots,
 				blockReader,
 				dirs.Tmp,
