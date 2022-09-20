@@ -276,6 +276,10 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		panic(err)
 	}
 
+	if interpreter.preimageCache != nil {
+		interpreter.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
+	}
+
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil
 }
@@ -557,6 +561,11 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	loc := scope.Stack.Peek()
 	interpreter.hasherBuf = loc.Bytes32()
 	interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+
+	if preimage, ok := interpreter.preimageCache[interpreter.hasherBuf]; ok {
+		ContractBalanceOfSlotCache[scope.Contract.Address()] = common.BytesToHash(preimage[:32])
+	}
+
 	return nil, nil
 }
 
@@ -856,6 +865,7 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	interpreter.evm.IntraBlockState().Suicide(callerAddr)
+	// delete(ContractBalanceOfSlotCache, scope.Contract.Address())
 	return nil, nil
 }
 

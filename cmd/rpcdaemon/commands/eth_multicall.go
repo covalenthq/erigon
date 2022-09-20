@@ -1,10 +1,13 @@
 package commands
 
 import (
+  "bytes"
   "context"
   "fmt"
+  "sync"
   "time"
 
+  "golang.org/x/crypto/sha3"
   "github.com/holiman/uint256"
   common2 "github.com/ledgerwatch/erigon-lib/common"
   "github.com/ledgerwatch/erigon/common"
@@ -13,6 +16,7 @@ import (
   "github.com/ledgerwatch/erigon/core"
   "github.com/ledgerwatch/erigon/core/state"
   "github.com/ledgerwatch/erigon/core/vm"
+  "github.com/ledgerwatch/erigon/crypto"
   "github.com/ledgerwatch/erigon/internal/ethapi"
   "github.com/ledgerwatch/erigon/rpc"
   "github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -28,6 +32,52 @@ type MulticallExecutionResult struct {
   UsedGas    uint64
   ReturnData hexutil.Bytes `json:",omitempty"`
   Err        string        `json:",omitempty"`
+}
+
+// hasherPool holds LegacyKeccak hashers.
+var hasherPool = sync.Pool{
+  New: func() interface{} {
+    return sha3.NewLegacyKeccak256()
+  },
+}
+
+func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr common.Address, holderAddr []byte) ([]byte, bool) {
+  baseSlot, ok := vm.ContractBalanceOfSlotCache[contractAddr]
+  if !ok {
+    return nil, false
+  }
+
+  var empty []byte
+
+  contractAcc, err := stateReader.ReadAccountData(contractAddr)
+  if err != nil {
+    return nil, false
+  }
+  if contractAcc == nil {
+    return empty, true
+  }
+
+  locBuf := make([]byte, 0, 64)
+
+  locBuf = append(locBuf, baseSlot.Bytes()...)
+  locBuf = append(locBuf, common.LeftPadBytes(holderAddr, 32)...)
+
+  // var hashedLocBuf = make([]byte, 0, 32)
+  var hashedLoc common.Hash
+
+  hasher := hasherPool.Get().(crypto.KeccakState)
+  defer hasherPool.Put(hasher)
+  hasher.Reset()
+  hasher.Write(locBuf)
+  if _, err := hasher.Read(hashedLoc[:]); err != nil {
+    panic(err)
+  }
+
+  res, err := stateReader.ReadAccountStorage(contractAddr, contractAcc.Incarnation, &hashedLoc)
+  if err != nil {
+    return nil, false
+  }
+  return res, true
 }
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -111,7 +161,21 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
+      if bytes.Equal(payload[:4], vm.BALANCEOF_SELECTOR) {
+        if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[16:36]); ok {
+          mcExecResult := &MulticallExecutionResult{
+            UsedGas:    0,
+            ReturnData: result,
+          }
+
+          execResultsForContract = append(execResultsForContract, mcExecResult)
+          execSeq++
+          continue
+        }
+      }
+
       callArgsBuf.Data = (*hexutil.Bytes)(&payload)
+
 
       msg, err := callArgsBuf.ToMessage(api.GasCap, baseFee)
       if err != nil {
