@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"bytes"
 	"hash"
 	"sync/atomic"
 
@@ -81,6 +82,9 @@ type VM struct {
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+
+	isCachingBalanceOf bool
+	preimageCache      map[common.Hash][]byte
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -174,6 +178,10 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 	}
 }
 
+var BALANCEOF_SELECTOR = []byte{112, 160, 130, 49}
+
+var ContractBalanceOfSlotCache = make(map[common.Address]common.Hash)
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -184,6 +192,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Increment the call depth which is restricted to 1024
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
+
+	if !in.isCachingBalanceOf && bytes.Equal(input[:4], BALANCEOF_SELECTOR) {
+		in.isCachingBalanceOf = true
+		in.preimageCache = make(map[common.Hash][]byte)
+		defer func() {
+			in.isCachingBalanceOf = false
+			in.preimageCache = nil
+		}()
+	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
