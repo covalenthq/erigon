@@ -193,7 +193,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
 
-	if !in.isCachingBalanceOf && bytes.Equal(input[:4], BALANCEOF_SELECTOR) {
+	if !in.isCachingBalanceOf && bytes.HasPrefix(input, BALANCEOF_SELECTOR) {
 		in.isCachingBalanceOf = true
 		in.preimageCache = make(map[common.Hash][]byte)
 		defer func() {
