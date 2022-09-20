@@ -221,6 +221,10 @@ type Config struct {
 
 	MemoryOverlay bool
 
+	HeadersStageInsertLimit uint64 `toml:",omitempty"`
+
+	IgnoreHeadersAboveHeight *big.Int `toml:",omitempty"`
+
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
 
