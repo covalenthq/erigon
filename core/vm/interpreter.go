@@ -195,12 +195,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	defer func() { in.evm.depth-- }()
 
 	if !in.isCachingBalanceOf && bytes.HasPrefix(input, BALANCEOF_SELECTOR) {
-		in.isCachingBalanceOf = true
-		in.preimageCache = make(map[common.Hash][]byte)
-		defer func() {
-			in.isCachingBalanceOf = false
-			in.preimageCache = nil
-		}()
+		if _, ok := ContractBalanceOfSlotCache.Load(contract.Address()); !ok {
+			in.isCachingBalanceOf = true
+			in.preimageCache = make(map[common.Hash][]byte)
+			defer func() {
+				in.isCachingBalanceOf = false
+				in.preimageCache = nil
+			}()
+		}
 	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
