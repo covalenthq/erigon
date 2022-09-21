@@ -47,6 +47,8 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
     return nil, false
   }
 
+  log.Info("[eth_multicall] accelerated", "baseSlot", baseSlot)
+
   var empty []byte
 
   contractAcc, err := stateReader.ReadAccountData(contractAddr)
