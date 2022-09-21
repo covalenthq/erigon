@@ -59,8 +59,8 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
 
   locBuf := make([]byte, 0, 64)
 
-  locBuf = append(locBuf, baseSlot.(common.Hash).Bytes()...)
   locBuf = append(locBuf, holderAddr...)
+  locBuf = append(locBuf, baseSlot.(common.Hash).Bytes()...)
 
   // var hashedLocBuf = make([]byte, 0, 32)
   var hashedLoc common.Hash
