@@ -47,8 +47,6 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
     return nil, false
   }
 
-  log.Info("[eth_multicall] accelerated", "baseSlot", baseSlot)
-
   var empty []byte
 
   contractAcc, err := stateReader.ReadAccountData(contractAddr)
@@ -152,6 +150,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
 
   ibs := state.New(stateReader)
   var execSeq int
+  var numAccelerated int
 
   for contractAddr, payloads := range contractsWithPayloads {
     callArgsBuf.To = &contractAddr
@@ -171,6 +170,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
           }
 
           execResultsForContract = append(execResultsForContract, mcExecResult)
+          numAccelerated++
           execSeq++
           continue
         }
@@ -228,7 +228,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
     execResults[contractAddr] = execResultsForContract
   }
 
-  log.Info("Executed eth_multicall", "runtime_usec", time.Since(startTime).Microseconds())
+  log.Info("Executed eth_multicall", "fast_path", numAccelerated, "slow_path", (execSeq - numAccelerated), "runtime_usec", time.Since(startTime).Microseconds())
 
   return execResults, nil
 }
