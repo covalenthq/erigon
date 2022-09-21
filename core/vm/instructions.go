@@ -564,7 +564,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 	if preimage, ok := interpreter.preimageCache[interpreter.hasherBuf]; ok {
 		if len(preimage) == 64 {
-			ContractBalanceOfSlotCache[scope.Contract.Address()] = common.BytesToHash(preimage[32:64])
+			ContractBalanceOfSlotCache.Store(scope.Contract.Address(), common.BytesToHash(preimage[32:64]))
 		}
 	}
 

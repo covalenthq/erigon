@@ -19,6 +19,7 @@ package vm
 import (
 	"bytes"
 	"hash"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -180,7 +181,7 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 
 var BALANCEOF_SELECTOR = []byte{112, 160, 130, 49}
 
-var ContractBalanceOfSlotCache = make(map[common.Address]common.Hash)
+var ContractBalanceOfSlotCache sync.Map
 
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
