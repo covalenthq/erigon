@@ -60,7 +60,7 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
   locBuf := make([]byte, 0, 64)
 
   locBuf = append(locBuf, baseSlot.(common.Hash).Bytes()...)
-  locBuf = append(locBuf, common.LeftPadBytes(holderAddr, 32)...)
+  locBuf = append(locBuf, holderAddr...)
 
   // var hashedLocBuf = make([]byte, 0, 32)
   var hashedLoc common.Hash
@@ -162,8 +162,8 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
-      if bytes.Equal(payload[:4], vm.BALANCEOF_SELECTOR) {
-        if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[16:36]); ok {
+      if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
+        if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
           mcExecResult := &MulticallExecutionResult{
             UsedGas:    0,
             ReturnData: result,
