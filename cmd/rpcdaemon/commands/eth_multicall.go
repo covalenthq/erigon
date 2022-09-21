@@ -77,7 +77,7 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
   if err != nil {
     return nil, false
   }
-  return res, true
+  return common.LeftPadBytes(res, 32), true
 }
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
