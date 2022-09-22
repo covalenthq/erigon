@@ -52,6 +52,24 @@ type Interpreter interface {
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
 }
 
+type balanceOfCachingStep int64
+
+const (
+	cachingAbortedNotEnoughInformation balanceOfCachingStep = iota
+	cachingFailedTooComplex
+	cachingSucceeded
+	notCaching
+	waitingForSha3
+	waitingForSload
+	waitingForReturn
+)
+
+type balanceOfCachingState struct {
+	StorageSlotBase  common.Hash
+	HashedStorageKey common.Hash
+	LoadedValue      common.Hash
+}
+
 // ScopeContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type ScopeContext struct {
@@ -59,9 +77,8 @@ type ScopeContext struct {
 	Stack    *stack.Stack
 	Contract *Contract
 
-	isCachingBalanceOf bool
-	preimageCache      map[common.Hash][]byte
-	sloadCache         map[common.Hash][]byte
+	boCacheStep  balanceOfCachingStep
+	boCacheState *balanceOfCachingState
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -251,11 +268,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}()
 	}
 
-	if bytes.HasPrefix(contract.Input, BALANCEOF_SELECTOR) {
+	if in.evm.depth == 1 && bytes.HasPrefix(contract.Input, BALANCEOF_SELECTOR) {
 		if _, ok := ContractBalanceOfSlotCache.Load(contract.Address()); !ok {
-			callContext.preimageCache = make(map[common.Hash][]byte)
-			callContext.sloadCache = make(map[common.Hash][]byte)
+			callContext.boCacheStep = waitingForSha3
+			callContext.boCacheState = &balanceOfCachingState{}
 		}
+		defer func() {
+			if callContext.boCacheStep != notCaching {
+				ContractBalanceOfSlotCache.Store(contract.Address(), nil)
+			}
+		}()
 	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an

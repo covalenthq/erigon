@@ -43,9 +43,10 @@ var hasherPool = sync.Pool{
 
 func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr common.Address, holderAddr []byte) ([]byte, bool) {
   baseSlot, ok := vm.ContractBalanceOfSlotCache.Load(contractAddr)
-  if !ok {
+  if !ok || baseSlot == nil {
     return nil, false
   }
+  baseSlotH := baseSlot.(common.Hash)
 
   var empty []byte
 
@@ -60,7 +61,7 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
   locBuf := make([]byte, 0, 64)
 
   locBuf = append(locBuf, holderAddr...)
-  locBuf = append(locBuf, baseSlot.(common.Hash).Bytes()...)
+  locBuf = append(locBuf, baseSlotH.Bytes()...)
 
   // var hashedLocBuf = make([]byte, 0, 32)
   var hashedLoc common.Hash

@@ -279,9 +279,15 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		panic(err)
 	}
 
-	if scope.preimageCache != nil && len(scope.Contract.Input) == 36 && len(data) == 64 {
-		if bytes.Equal(scope.Contract.Input[4:36], data[0:32]) && bytes.HasPrefix(data[32:64], baseSlotPrefix[:]) {
-			scope.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
+	if scope.boCacheStep > notCaching {
+		if scope.boCacheStep == waitingForSha3 && len(scope.Contract.Input) == 36 && len(data) == 64 && bytes.Equal(scope.Contract.Input[4:36], data[0:32]) && bytes.HasPrefix(data[32:64], baseSlotPrefix[:]) {
+			scope.boCacheState.StorageSlotBase = common.BytesToHash(data[32:64])
+			scope.boCacheState.HashedStorageKey = interpreter.hasherBuf
+			scope.boCacheStep = waitingForSload
+			// log.Info("evm boCacheState", "contract", scope.Contract.Address(), "pc", *pc, "newState", "waitingForSload", "HashedStorageKey", scope.boCacheState.HashedStorageKey, "StorageSlotBase", scope.boCacheState.StorageSlotBase)
+		} else {
+			scope.boCacheState = nil
+			scope.boCacheStep = cachingFailedTooComplex
 		}
 	}
 
@@ -567,9 +573,21 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	interpreter.hasherBuf = loc.Bytes32()
 	interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
 
-	if preimage, ok := scope.preimageCache[interpreter.hasherBuf]; ok {
-		if len(preimage) == 64 {
-			scope.sloadCache[loc.Bytes32()] = preimage
+	if scope.boCacheStep > notCaching {
+		if scope.boCacheStep == waitingForSload && scope.boCacheState.HashedStorageKey == interpreter.hasherBuf {
+			newVal := loc.Bytes32()
+			newValH := common.BytesToHash(newVal[:])
+			if newValH != (common.Hash{}) {
+				scope.boCacheState.LoadedValue = newValH
+				scope.boCacheStep = waitingForReturn
+				// log.Info("evm boCacheState", "contract", scope.Contract.Address(), "pc", *pc, "newState", "waitingForReturn", "LoadedValue", newValH)
+			} else {
+				scope.boCacheState = nil
+				scope.boCacheStep = notCaching // aborted -- not enough information
+			}
+		} else {
+			scope.boCacheState = nil
+			scope.boCacheStep = cachingFailedTooComplex
 		}
 	}
 
@@ -629,6 +647,13 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	} else {
 		*pc++
 	}
+
+	if scope.boCacheStep > waitingForSha3 {
+		// in simple balanceOf, there should be no JUMPI after SHA3
+		scope.boCacheStep = cachingFailedTooComplex
+		scope.boCacheState = nil
+	}
+
 	return nil, nil
 }
 
@@ -850,10 +875,21 @@ func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
-	if scope.sloadCache != nil {
-		if preimage, ok := scope.sloadCache[common.BytesToHash(ret)]; ok {
-			ContractBalanceOfSlotCache.Store(scope.Contract.Address(), common.BytesToHash(preimage[32:64]))
+	if scope.boCacheStep > notCaching {
+		if scope.boCacheStep == waitingForReturn {
+			retH := common.BytesToHash(ret)
+			if retH == scope.boCacheState.LoadedValue {
+				ContractBalanceOfSlotCache.Store(scope.Contract.Address(), scope.boCacheState.StorageSlotBase)
+				scope.boCacheStep = notCaching // succeeded
+				// log.Info("evm ContractBalanceOfSlotCache", "contract", scope.Contract.Address(), "pc", *pc, "StorageSlotBase", scope.boCacheState.StorageSlotBase)
+			} else {
+				scope.boCacheStep = cachingFailedTooComplex
+			}
+		} else {
+			scope.boCacheStep = cachingFailedTooComplex
 		}
+
+		scope.boCacheState = nil
 	}
 
 	return ret, nil
