@@ -63,7 +63,6 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
   locBuf = append(locBuf, holderAddr...)
   locBuf = append(locBuf, baseSlotH.Bytes()...)
 
-  // var hashedLocBuf = make([]byte, 0, 32)
   var hashedLoc common.Hash
 
   hasher := hasherPool.Get().(crypto.KeccakState)
@@ -163,20 +162,20 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
-      var accelCrosscheckResult []byte
+      // var accelCrosscheckResult []byte
 
       if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
         if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
-          accelCrosscheckResult = result
-          // mcExecResult := &MulticallExecutionResult{
-          //   UsedGas:    0,
-          //   ReturnData: result,
-          // }
+          // accelCrosscheckResult = result
+          mcExecResult := &MulticallExecutionResult{
+            UsedGas:    0,
+            ReturnData: result,
+          }
 
-          // execResultsForContract = append(execResultsForContract, mcExecResult)
-          // numAccelerated++
-          // execSeq++
-          // continue
+          execResultsForContract = append(execResultsForContract, mcExecResult)
+          numAccelerated++
+          execSeq++
+          continue
         }
       }
 
@@ -207,17 +206,17 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         effectiveErrDesc = ethapi.NewRevertError(execResult).Error()
       }
 
-      if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
-        panic(fmt.Sprintf(
-          "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
-          blockNumber,
-          contractAddr,
-          common.BytesToAddress(payload[4:36]),
-          new(uint256.Int).SetBytes(execResult.ReturnData),
-          effectiveErrDesc,
-          new(uint256.Int).SetBytes(accelCrosscheckResult),
-        ))
-      }
+      // if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
+      //   panic(fmt.Sprintf(
+      //     "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
+      //     blockNumber,
+      //     contractAddr,
+      //     common.BytesToAddress(payload[4:36]),
+      //     new(uint256.Int).SetBytes(execResult.ReturnData),
+      //     effectiveErrDesc,
+      //     new(uint256.Int).SetBytes(accelCrosscheckResult),
+      //   ))
+      // }
 
       chainRules := evm.ChainRules()
 
