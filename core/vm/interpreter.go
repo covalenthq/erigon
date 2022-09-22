@@ -19,6 +19,7 @@ package vm
 import (
 	"bytes"
 	"hash"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -51,12 +52,33 @@ type Interpreter interface {
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
 }
 
+type balanceOfCachingStep int64
+
+const (
+	cachingAbortedNotEnoughInformation balanceOfCachingStep = iota
+	cachingFailedTooComplex
+	cachingSucceeded
+	notCaching
+	waitingForSha3
+	waitingForSload
+	waitingForReturn
+)
+
+type balanceOfCachingState struct {
+	StorageSlotBase  common.Hash
+	HashedStorageKey common.Hash
+	LoadedValue      common.Hash
+}
+
 // ScopeContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	boCacheStep  balanceOfCachingStep
+	boCacheState *balanceOfCachingState
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -82,9 +104,6 @@ type VM struct {
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
-
-	isCachingBalanceOf bool
-	preimageCache      map[common.Hash][]byte
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -180,7 +199,7 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 
 var BALANCEOF_SELECTOR = []byte{112, 160, 130, 49}
 
-var ContractBalanceOfSlotCache = make(map[common.Address]common.Hash)
+var ContractBalanceOfSlotCache sync.Map
 
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
@@ -192,15 +211,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Increment the call depth which is restricted to 1024
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
-
-	if !in.isCachingBalanceOf && bytes.Equal(input[:4], BALANCEOF_SELECTOR) {
-		in.isCachingBalanceOf = true
-		in.preimageCache = make(map[common.Hash][]byte)
-		defer func() {
-			in.isCachingBalanceOf = false
-			in.preimageCache = nil
-		}()
-	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -257,6 +267,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}()
 	}
+
+	if in.evm.depth == 1 && bytes.HasPrefix(contract.Input, BALANCEOF_SELECTOR) {
+		if _, ok := ContractBalanceOfSlotCache.Load(contract.Address()); !ok {
+			callContext.boCacheStep = waitingForSha3
+			callContext.boCacheState = &balanceOfCachingState{}
+		}
+		defer func() {
+			if callContext.boCacheStep != notCaching {
+				ContractBalanceOfSlotCache.Store(contract.Address(), nil)
+			}
+		}()
+	}
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the

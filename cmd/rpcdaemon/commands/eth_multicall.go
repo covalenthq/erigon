@@ -42,10 +42,11 @@ var hasherPool = sync.Pool{
 }
 
 func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr common.Address, holderAddr []byte) ([]byte, bool) {
-  baseSlot, ok := vm.ContractBalanceOfSlotCache[contractAddr]
-  if !ok {
+  baseSlot, ok := vm.ContractBalanceOfSlotCache.Load(contractAddr)
+  if !ok || baseSlot == nil {
     return nil, false
   }
+  baseSlotH := baseSlot.(common.Hash)
 
   var empty []byte
 
@@ -59,10 +60,9 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
 
   locBuf := make([]byte, 0, 64)
 
-  locBuf = append(locBuf, baseSlot.Bytes()...)
-  locBuf = append(locBuf, common.LeftPadBytes(holderAddr, 32)...)
+  locBuf = append(locBuf, holderAddr...)
+  locBuf = append(locBuf, baseSlotH.Bytes()...)
 
-  // var hashedLocBuf = make([]byte, 0, 32)
   var hashedLoc common.Hash
 
   hasher := hasherPool.Get().(crypto.KeccakState)
@@ -77,7 +77,7 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
   if err != nil {
     return nil, false
   }
-  return res, true
+  return common.LeftPadBytes(res, 32), true
 }
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -150,6 +150,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
 
   ibs := state.New(stateReader)
   var execSeq int
+  var numAccelerated int
 
   for contractAddr, payloads := range contractsWithPayloads {
     callArgsBuf.To = &contractAddr
@@ -161,14 +162,18 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
-      if bytes.Equal(payload[:4], vm.BALANCEOF_SELECTOR) {
-        if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[16:36]); ok {
+      // var accelCrosscheckResult []byte
+
+      if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
+        if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
+          // accelCrosscheckResult = result
           mcExecResult := &MulticallExecutionResult{
             UsedGas:    0,
             ReturnData: result,
           }
 
           execResultsForContract = append(execResultsForContract, mcExecResult)
+          numAccelerated++
           execSeq++
           continue
         }
@@ -201,6 +206,18 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         effectiveErrDesc = ethapi.NewRevertError(execResult).Error()
       }
 
+      // if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
+      //   panic(fmt.Sprintf(
+      //     "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
+      //     blockNumber,
+      //     contractAddr,
+      //     common.BytesToAddress(payload[4:36]),
+      //     new(uint256.Int).SetBytes(execResult.ReturnData),
+      //     effectiveErrDesc,
+      //     new(uint256.Int).SetBytes(accelCrosscheckResult),
+      //   ))
+      // }
+
       chainRules := evm.ChainRules()
 
       if err = ibs.FinalizeTx(chainRules, noopWriter); err != nil {
@@ -226,7 +243,7 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
     execResults[contractAddr] = execResultsForContract
   }
 
-  log.Info("Executed eth_multicall", "runtime_usec", time.Since(startTime).Microseconds())
+  log.Info("Executed eth_multicall", "fast_path", numAccelerated, "slow_path", (execSeq - numAccelerated), "runtime_usec", time.Since(startTime).Microseconds())
 
   return execResults, nil
 }
