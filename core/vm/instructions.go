@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -262,6 +263,8 @@ func opSAR(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+var baseSlotPrefix = [24]byte{}
+
 func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Peek()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
@@ -276,8 +279,10 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		panic(err)
 	}
 
-	if interpreter.preimageCache != nil {
-		interpreter.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
+	if interpreter.preimageCache != nil && len(scope.Contract.Input) == 36 && len(data) == 64 {
+		if bytes.Equal(scope.Contract.Input[4:36], data[0:32]) && bytes.HasPrefix(data[32:64], baseSlotPrefix[:]) {
+			interpreter.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
+		}
 	}
 
 	size.SetBytes(interpreter.hasherBuf[:])
