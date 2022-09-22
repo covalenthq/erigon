@@ -58,6 +58,10 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	isCachingBalanceOf bool
+	preimageCache      map[common.Hash][]byte
+	sloadCache         map[common.Hash][]byte
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -83,9 +87,6 @@ type VM struct {
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
-
-	isCachingBalanceOf bool
-	preimageCache      map[common.Hash][]byte
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -194,17 +195,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
 
-	if !in.isCachingBalanceOf && bytes.HasPrefix(input, BALANCEOF_SELECTOR) {
-		if _, ok := ContractBalanceOfSlotCache.Load(contract.Address()); !ok {
-			in.isCachingBalanceOf = true
-			in.preimageCache = make(map[common.Hash][]byte)
-			defer func() {
-				in.isCachingBalanceOf = false
-				in.preimageCache = nil
-			}()
-		}
-	}
-
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	callback := in.setReadonly(readOnly)
@@ -260,6 +250,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}()
 	}
+
+	if bytes.HasPrefix(contract.Input, BALANCEOF_SELECTOR) {
+		if _, ok := ContractBalanceOfSlotCache.Load(contract.Address()); !ok {
+			callContext.preimageCache = make(map[common.Hash][]byte)
+			callContext.sloadCache = make(map[common.Hash][]byte)
+		}
+	}
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the

@@ -279,9 +279,9 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		panic(err)
 	}
 
-	if interpreter.preimageCache != nil && len(scope.Contract.Input) == 36 && len(data) == 64 {
+	if scope.preimageCache != nil && len(scope.Contract.Input) == 36 && len(data) == 64 {
 		if bytes.Equal(scope.Contract.Input[4:36], data[0:32]) && bytes.HasPrefix(data[32:64], baseSlotPrefix[:]) {
-			interpreter.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
+			scope.preimageCache[interpreter.hasherBuf] = common.CopyBytes(data)
 		}
 	}
 
@@ -567,9 +567,9 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	interpreter.hasherBuf = loc.Bytes32()
 	interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
 
-	if preimage, ok := interpreter.preimageCache[interpreter.hasherBuf]; ok {
+	if preimage, ok := scope.preimageCache[interpreter.hasherBuf]; ok {
 		if len(preimage) == 64 {
-			ContractBalanceOfSlotCache.Store(scope.Contract.Address(), common.BytesToHash(preimage[32:64]))
+			scope.sloadCache[loc.Bytes32()] = preimage
 		}
 	}
 
@@ -849,6 +849,13 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
+
+	if scope.sloadCache != nil {
+		if preimage, ok := scope.sloadCache[common.BytesToHash(ret)]; ok {
+			ContractBalanceOfSlotCache.Store(scope.Contract.Address(), common.BytesToHash(preimage[32:64]))
+		}
+	}
+
 	return ret, nil
 }
 

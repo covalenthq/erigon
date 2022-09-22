@@ -199,22 +199,23 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
 
       execResult, applyMsgErr := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 
-      if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
-        panic(fmt.Sprintf(
-          "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v fastPath=%v",
-          blockNumber,
-          contractAddr,
-          common.BytesToAddress(payload[4:36]),
-          execResult,
-          accelCrosscheckResult,
-        ))
-      }
-
       var effectiveErrDesc string
       if applyMsgErr != nil {
         effectiveErrDesc = applyMsgErr.Error()
       } else if execResult.Err != nil {
         effectiveErrDesc = ethapi.NewRevertError(execResult).Error()
+      }
+
+      if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
+        panic(fmt.Sprintf(
+          "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
+          blockNumber,
+          contractAddr,
+          common.BytesToAddress(payload[4:36]),
+          new(uint256.Int).SetBytes(execResult.ReturnData),
+          effectiveErrDesc,
+          new(uint256.Int).SetBytes(accelCrosscheckResult),
+        ))
       }
 
       chainRules := evm.ChainRules()
