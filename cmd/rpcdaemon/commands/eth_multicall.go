@@ -162,17 +162,20 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
         return nil, err
       }
 
+      var accelCrosscheckResult []byte
+
       if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
         if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
-          mcExecResult := &MulticallExecutionResult{
-            UsedGas:    0,
-            ReturnData: result,
-          }
+          accelCrosscheckResult = result
+          // mcExecResult := &MulticallExecutionResult{
+          //   UsedGas:    0,
+          //   ReturnData: result,
+          // }
 
-          execResultsForContract = append(execResultsForContract, mcExecResult)
-          numAccelerated++
-          execSeq++
-          continue
+          // execResultsForContract = append(execResultsForContract, mcExecResult)
+          // numAccelerated++
+          // execSeq++
+          // continue
         }
       }
 
@@ -195,6 +198,17 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
       ibs.Prepare(common.Hash{}, blockHeader.Hash(), execSeq)
 
       execResult, applyMsgErr := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+
+      if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
+        panic(fmt.Sprintf(
+          "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v fastPath=%v",
+          blockNumber,
+          contractAddr,
+          common.BytesToAddress(payload[4:36]),
+          execResult,
+          accelCrosscheckResult,
+        ))
+      }
 
       var effectiveErrDesc string
       if applyMsgErr != nil {
