@@ -42,6 +42,10 @@ type CommonTx struct {
 	V, R, S uint256.Int     // signature values
 }
 
+func (ct *CommonTx) SetFrom(from common.Address) {
+	ct.from.Store(from)
+}
+
 func (ct CommonTx) GetChainID() *uint256.Int {
 	return ct.ChainID
 }

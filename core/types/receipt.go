@@ -65,9 +65,9 @@ type Receipt struct {
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty" codec:"-"`
-	BlockNumber      *big.Int    `json:"blockNumber,omitempty" codec:"-"`
-	TransactionIndex uint        `json:"transactionIndex" codec:"-"`
+	BlockHash        common.Hash    `json:"blockHash,omitempty" codec:"-"`
+	BlockNumber      *big.Int       `json:"blockNumber,omitempty" codec:"-"`
+	TransactionIndex uint           `json:"transactionIndex" codec:"-"`
 }
 
 type receiptMarshaling struct {

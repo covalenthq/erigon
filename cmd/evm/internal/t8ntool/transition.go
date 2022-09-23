@@ -145,16 +145,40 @@ func Main(ctx *cli.Context) error {
 		txs      types.Transactions // txs to apply
 		allocStr = ctx.String(InputAllocFlag.Name)
 
-		envStr    = ctx.String(InputEnvFlag.Name)
-		txStr     = ctx.String(InputTxsFlag.Name)
-		inputData = &input{}
+		envStr               = ctx.String(InputEnvFlag.Name)
+		txStr                = ctx.String(InputTxsFlag.Name)
+		blockReplicaStr      = ctx.String(InputReplicaFlag.Name)
+		inputData            = &input{}
+		inputReplica         = BlockReplica{}
+		replicaInputProvided = false
 	)
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
 		decoder.Decode(inputData) //nolint:errcheck
 	}
-	if allocStr != stdinSelector {
+
+	if len(blockReplicaStr) > 0 {
+		var decoder *json.Decoder
+		if blockReplicaStr == stdinSelector {
+			decoder = json.NewDecoder(os.Stdin)
+		} else {
+			inFile, err1 := os.Open(blockReplicaStr)
+			if err1 != nil {
+				return NewError(ErrorIO, fmt.Errorf("failed reading specimen file: %v", err1))
+			}
+			defer inFile.Close()
+			decoder = json.NewDecoder(inFile)
+		}
+
+		if err = decoder.Decode(&inputReplica); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("error unmarshalling replica file: %v", err))
+		}
+
+		replicaInputProvided = true
+	}
+
+	if allocStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(allocStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
@@ -164,12 +188,38 @@ func Main(ctx *cli.Context) error {
 		if err = decoder.Decode(&inputData.Alloc); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
+	} else if replicaInputProvided {
+		Alloc := make(map[common.Address]core.GenesisAccount)
+		Storage := make(map[common.Address]map[common.Hash]common.Hash)
+		Code := make(map[common.Hash][]byte)
+		var ok bool
+		for _, storageRead := range inputReplica.State.StorageRead {
+			if _, ok = Storage[storageRead.Account]; !ok {
+				Storage[storageRead.Account] = make(map[common.Hash]common.Hash)
+			}
+			Storage[storageRead.Account][storageRead.SlotKey] = storageRead.Value
+		}
+
+		for _, codeRead := range inputReplica.State.CodeRead {
+			Code[codeRead.Hash] = codeRead.Code
+		}
+
+		for _, accountRead := range inputReplica.State.AccountRead {
+			Alloc[accountRead.Address] = core.GenesisAccount{
+				Balance: accountRead.Balance.Int,
+				Storage: Storage[accountRead.Address],
+				Nonce:   accountRead.Nonce,
+				Code:    Code[accountRead.CodeHash],
+			}
+		}
+
+		inputData.Alloc = Alloc
 	}
 
 	prestate.Pre = inputData.Alloc
 
 	// Set the block environment
-	if envStr != stdinSelector {
+	if envStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(envStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err1))
@@ -181,12 +231,16 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
 		}
 		inputData.Env = &env
+	} else if replicaInputProvided {
+		inputData.Env = &stEnv{}
+		inputData.Env.loadFromReplica(&inputReplica)
 	}
 	prestate.Env = *inputData.Env
 
 	vmConfig := vm.Config{
-		Tracer: nil,
-		Debug:  ctx.Bool(TraceFlag.Name),
+		Tracer:        nil,
+		Debug:         ctx.Bool(TraceFlag.Name),
+		StatelessExec: true,
 	}
 	// Construct the chainconfig
 	var chainConfig *params.ChainConfig
@@ -200,7 +254,7 @@ func Main(ctx *cli.Context) error {
 	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
-	if txStr != stdinSelector {
+	if txStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(txStr)
 		if err1 != nil {
 			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
@@ -210,6 +264,16 @@ func Main(ctx *cli.Context) error {
 		if err = decoder.Decode(&txsWithKeys); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
+	} else if replicaInputProvided {
+		for _, tx := range inputReplica.Transactions {
+			atx, err := tx.adaptTransaction()
+			if err != nil {
+				panic(err)
+			}
+			txsWithKeys = append(txsWithKeys, &txWithKey{
+				tx: atx,
+			})
+		}
 	} else {
 		txsWithKeys = inputData.Txs
 	}
@@ -218,6 +282,11 @@ func Main(ctx *cli.Context) error {
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
+	}
+	if replicaInputProvided {
+		for i, tx := range txs {
+			tx.SetSender(inputReplica.Senders[i]) // avoid sender recovery (expensive) by using cached senders
+		}
 	}
 
 	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
@@ -282,7 +351,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, true, getTracer)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, getTracer)
 
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
@@ -304,7 +373,35 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
-	return dispatchOutput(ctx, baseDir, result, collector, body)
+
+	var blockResult BlockReplica
+
+	if len(ctx.String(OutputBlockResultFlag.Name)) != 0 {
+		new_transactions, err := convertTransactions(txs)
+		if err != nil {
+			return err
+		}
+
+		adapted_header, err := adaptHeader(header)
+		if err != nil {
+			return err
+		}
+		blockResult = BlockReplica{
+			Type:            "block-result",
+			NetworkId:       chainConfig.ChainID.Uint64(),
+			Hash:            result.StateRoot,
+			TotalDifficulty: inputReplica.TotalDifficulty, // note: check
+			Header:          adapted_header,
+			Transactions:    new_transactions,
+			Uncles:          converUncles(ommerHeaders),
+			Receipts:        convertReceipts(result.Receipts),
+			Senders:         inputReplica.Senders, // avoid sender recovery (expensive) by using cached senders
+		}
+
+		//fmt.Println(exportBlockReplica) // should use dispatch output for this.s
+	}
+
+	return dispatchOutput(ctx, baseDir, result, collector, body, blockResult)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -510,7 +607,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes, blockResult BlockReplica) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {
@@ -537,6 +634,11 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 	if err := dispatch(baseDir, ctx.String(OutputBodyFlag.Name), "body", body); err != nil {
 		return err
 	}
+	if blockResultOut := ctx.String(OutputBlockResultFlag.Name); len(blockResultOut) != 0 {
+		if err := dispatch(baseDir, blockResultOut, "block_result", blockResult); err != nil {
+			return err
+		}
+	}
 	if len(stdOutObject) > 0 {
 		b, err := json.MarshalIndent(stdOutObject, "", " ")
 		if err != nil {
@@ -556,7 +658,7 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv, Eip1559 bool) *types.Header {
 	var header types.Header
-	header.UncleHash = env.ParentUncleHash
+	header.UncleHash = env.UncleHash
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.Number = big.NewInt(int64(env.Number))

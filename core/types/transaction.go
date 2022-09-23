@@ -87,7 +87,7 @@ type Transaction interface {
 	IsStarkNet() bool
 }
 
-// TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
+// TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
 // implementations of different transaction types
 type TransactionMisc struct {
 	time time.Time // Time first seen locally (spam avoidance)
@@ -498,3 +498,6 @@ func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }
+func (m *Message) SetCheckNonce(checkNonce bool) {
+	m.checkNonce = checkNonce
+}
