@@ -24,7 +24,7 @@ import (
   "github.com/ledgerwatch/log/v3"
 )
 
-type MulticallRunlist map[rpc.BlockNumber]MulticallPerBlockRunlist
+type MulticallRunlist map[string]MulticallPerBlockRunlist
 type MulticallPerBlockRunlist map[common.Address][]hexutil.Bytes
 
 type MulticallResult map[uint64]MulticallPerBlockResult
@@ -119,7 +119,10 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   var execSeq int
   var numAccelerated int
 
-  for number, contractsWithPayloads := range contractsWithPayloadsByBlock {
+  for numberStr, contractsWithPayloads := range contractsWithPayloadsByBlock {
+    var number rpc.BlockNumber
+    number.UnmarshalJSON([]byte(numberStr))
+
     blockExecResults := make(MulticallPerBlockResult)
 
     blockNrOrHash := rpc.BlockNumberOrHashWithNumber(number)
