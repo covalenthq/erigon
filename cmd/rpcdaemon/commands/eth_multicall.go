@@ -24,11 +24,17 @@ import (
   "github.com/ledgerwatch/log/v3"
 )
 
-type MulticallRunlist map[string]MulticallPerBlockRunlist
-type MulticallPerBlockRunlist map[common.Address][]hexutil.Bytes
+type MulticallQuery struct {
+  Contracts    MulticallRunlist
+  BlockNumbers []rpc.BlockNumber
+}
 
-type MulticallResult map[uint64]MulticallPerBlockResult
+type MulticallRunlist map[common.Address][]hexutil.Bytes
+
 type MulticallPerBlockResult map[common.Address][]*MulticallExecutionResult
+
+type MulticallResultByContract map[common.Address]MulticallPerContractResult
+type MulticallPerContractResult [][]*MulticallExecutionResult
 
 type MulticallExecutionResult struct {
   UsedGas    uint64
@@ -83,11 +89,11 @@ func computeWithCachedBalanceSlot(stateReader state.StateReader, contractAddr co
 }
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArgs, contractsWithPayloadsByBlock MulticallRunlist, overrides *map[common.Address]ethapi.Account) (MulticallResult, error) {
+func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArgs, queries []MulticallQuery, overrides *map[common.Address]ethapi.Account) ([]MulticallResultByContract, error) {
   startTime := time.Now()
 
   // result stores
-  execResults := make(MulticallResult)
+  queryResults := make([]MulticallResultByContract, 0, len(queries))
 
   dbtx, err := api.db.BeginRo(ctx)
   if err != nil {
@@ -119,144 +125,167 @@ func (api *APIImpl) Multicall(ctx context.Context, commonCallArgs ethapi.CallArg
   var execSeq int
   var numAccelerated int
 
-  for numberStr, contractsWithPayloads := range contractsWithPayloadsByBlock {
-    var number rpc.BlockNumber
-    number.UnmarshalJSON([]byte(numberStr))
+  for _, query := range queries {
+    respSlotsPerPayload := len(query.BlockNumbers)
 
-    blockExecResults := make(MulticallPerBlockResult)
+    execResultsByBlockIndex := make([]MulticallPerBlockResult, respSlotsPerPayload)
 
-    blockNrOrHash := rpc.BlockNumberOrHashWithNumber(number)
+    for _, number := range query.BlockNumbers {
+      blockExecResults := make(MulticallPerBlockResult)
 
-    blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, dbtx, api.filters)
-    if err != nil {
-      return nil, err
-    }
-    block, err := api.BaseAPI.blockByNumberWithSenders(dbtx, blockNumber)
-    if err != nil {
-      return nil, err
-    }
+      blockNrOrHash := rpc.BlockNumberOrHashWithNumber(number)
 
-    blockHeader := block.Header()
-
-    var baseFee *uint256.Int
-    if blockHeader.BaseFee != nil {
-      var overflow bool
-      baseFee, overflow = uint256.FromBig(blockHeader.BaseFee)
-      if overflow {
-        return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+      blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, dbtx, api.filters)
+      if err != nil {
+        return nil, err
       }
-    }
+      block, err := api.BaseAPI.blockByNumberWithSenders(dbtx, blockNumber)
+      if err != nil {
+        return nil, err
+      }
 
-    var stateReader state.StateReader
-    stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg)
-    if err != nil {
-      return nil, err
-    }
+      blockHeader := block.Header()
 
-    callArgsBuf := commonCallArgs
-    callArgsBuf.MaxFeePerGas = (*hexutil.Big)(blockHeader.BaseFee)
-
-    if callArgsBuf.Gas == nil || uint64(*callArgsBuf.Gas) == 0 {
-      callArgsBuf.Gas = (*hexutil.Uint64)(&api.GasCap)
-    }
-
-    ibs := state.New(stateReader)
-
-    for contractAddr, payloads := range contractsWithPayloads {
-      callArgsBuf.To = &contractAddr
-
-      contractExecResults := make([]*MulticallExecutionResult, 0, len(payloads))
-
-      for _, payload := range payloads {
-        if err := common2.Stopped(execCtx.Done()); err != nil {
-          return nil, err
+      var baseFee *uint256.Int
+      if blockHeader.BaseFee != nil {
+        var overflow bool
+        baseFee, overflow = uint256.FromBig(blockHeader.BaseFee)
+        if overflow {
+          return nil, fmt.Errorf("header.BaseFee uint256 overflow")
         }
+      }
 
-        // var accelCrosscheckResult []byte
+      var stateReader state.StateReader
+      stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg)
+      if err != nil {
+        return nil, err
+      }
 
-        if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
-          if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
-            // accelCrosscheckResult = result
-            mcExecResult := &MulticallExecutionResult{
-              UsedGas:    0,
-              ReturnData: result,
-            }
+      callArgsBuf := commonCallArgs
+      callArgsBuf.MaxFeePerGas = (*hexutil.Big)(blockHeader.BaseFee)
 
-            contractExecResults = append(contractExecResults, mcExecResult)
-            numAccelerated++
-            execSeq++
-            continue
+      if callArgsBuf.Gas == nil || uint64(*callArgsBuf.Gas) == 0 {
+        callArgsBuf.Gas = (*hexutil.Uint64)(&api.GasCap)
+      }
+
+      ibs := state.New(stateReader)
+
+      for contractAddr, payloads := range query.Contracts {
+        callArgsBuf.To = &contractAddr
+
+        contractExecResults := make([]*MulticallExecutionResult, 0, len(payloads))
+
+        for _, payload := range payloads {
+          if err := common2.Stopped(execCtx.Done()); err != nil {
+            return nil, err
           }
+
+          // var accelCrosscheckResult []byte
+
+          if bytes.HasPrefix(payload, vm.BALANCEOF_SELECTOR) && len(payload) == 36 {
+            if result, ok := computeWithCachedBalanceSlot(stateReader, contractAddr, payload[4:36]); ok {
+              // accelCrosscheckResult = result
+              mcExecResult := &MulticallExecutionResult{
+                UsedGas:    0,
+                ReturnData: result,
+              }
+
+              contractExecResults = append(contractExecResults, mcExecResult)
+              numAccelerated++
+              execSeq++
+              continue
+            }
+          }
+
+          callArgsBuf.Data = (*hexutil.Bytes)(&payload)
+
+          msg, err := callArgsBuf.ToMessage(api.GasCap, baseFee)
+          if err != nil {
+            return nil, err
+          }
+
+          blockCtx, txCtx := transactions.GetEvmContext(msg, blockHeader, blockNrOrHash.RequireCanonical, dbtx, api._blockReader)
+          blockCtx.GasLimit = math.MaxUint64
+          blockCtx.MaxGasLimit = true
+
+          evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+          gp := new(core.GasPool).AddGas(msg.Gas())
+
+          // Clone the state cache before applying the changes, clone is discarded
+          ibs.Prepare(common.Hash{}, blockHeader.Hash(), execSeq)
+
+          execResult, applyMsgErr := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+
+          var effectiveErrDesc string
+          if applyMsgErr != nil {
+            effectiveErrDesc = applyMsgErr.Error()
+          } else if execResult.Err != nil {
+            effectiveErrDesc = ethapi.NewRevertError(execResult).Error()
+          }
+
+          // if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
+          //   panic(fmt.Sprintf(
+          //     "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
+          //     blockNumber,
+          //     contractAddr,
+          //     common.BytesToAddress(payload[4:36]),
+          //     new(uint256.Int).SetBytes(execResult.ReturnData),
+          //     effectiveErrDesc,
+          //     new(uint256.Int).SetBytes(accelCrosscheckResult),
+          //   ))
+          // }
+
+          chainRules := evm.ChainRules()
+
+          if err = ibs.FinalizeTx(chainRules, noopWriter); err != nil {
+            return nil, err
+          }
+          if err = ibs.CommitBlock(chainRules, noopWriter); err != nil {
+            return nil, err
+          }
+
+          mcExecResult := &MulticallExecutionResult{
+            UsedGas: execResult.UsedGas,
+            Err:     effectiveErrDesc,
+          }
+
+          if len(execResult.ReturnData) > 0 {
+            mcExecResult.ReturnData = common.CopyBytes(execResult.ReturnData)
+          }
+
+          contractExecResults = append(contractExecResults, mcExecResult)
+          execSeq++
         }
 
-        callArgsBuf.Data = (*hexutil.Bytes)(&payload)
-
-        msg, err := callArgsBuf.ToMessage(api.GasCap, baseFee)
-        if err != nil {
-          return nil, err
-        }
-
-        blockCtx, txCtx := transactions.GetEvmContext(msg, blockHeader, blockNrOrHash.RequireCanonical, dbtx, api._blockReader)
-        blockCtx.GasLimit = math.MaxUint64
-        blockCtx.MaxGasLimit = true
-
-        evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-        gp := new(core.GasPool).AddGas(msg.Gas())
-
-        // Clone the state cache before applying the changes, clone is discarded
-        ibs.Prepare(common.Hash{}, blockHeader.Hash(), execSeq)
-
-        execResult, applyMsgErr := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
-
-        var effectiveErrDesc string
-        if applyMsgErr != nil {
-          effectiveErrDesc = applyMsgErr.Error()
-        } else if execResult.Err != nil {
-          effectiveErrDesc = ethapi.NewRevertError(execResult).Error()
-        }
-
-        // if accelCrosscheckResult != nil && len(execResult.ReturnData) > 0 && !bytes.Equal(execResult.ReturnData, accelCrosscheckResult) {
-        //   panic(fmt.Sprintf(
-        //     "balanceOf accel failure: block=%d contract=%v holder=%v slowPath=%v slowPathErr=%s fastPath=%v",
-        //     blockNumber,
-        //     contractAddr,
-        //     common.BytesToAddress(payload[4:36]),
-        //     new(uint256.Int).SetBytes(execResult.ReturnData),
-        //     effectiveErrDesc,
-        //     new(uint256.Int).SetBytes(accelCrosscheckResult),
-        //   ))
-        // }
-
-        chainRules := evm.ChainRules()
-
-        if err = ibs.FinalizeTx(chainRules, noopWriter); err != nil {
-          return nil, err
-        }
-        if err = ibs.CommitBlock(chainRules, noopWriter); err != nil {
-          return nil, err
-        }
-
-        mcExecResult := &MulticallExecutionResult{
-          UsedGas: execResult.UsedGas,
-          Err:     effectiveErrDesc,
-        }
-
-        if len(execResult.ReturnData) > 0 {
-          mcExecResult.ReturnData = common.CopyBytes(execResult.ReturnData)
-        }
-
-        contractExecResults = append(contractExecResults, mcExecResult)
-        execSeq++
+        blockExecResults[contractAddr] = contractExecResults
       }
 
-      blockExecResults[contractAddr] = contractExecResults
+      execResultsByBlockIndex = append(execResultsByBlockIndex, blockExecResults)
     }
 
-    execResults[blockNumber] = blockExecResults
+    execResultsByContract := make(MulticallResultByContract)
+
+    for blockIndex, contracts := range execResultsByBlockIndex {
+      for contractAddr, perPayloadResults := range contracts {
+        if _, ok := execResultsByContract[contractAddr]; !ok {
+          execResultsByContract[contractAddr] = make(MulticallPerContractResult, 0, len(perPayloadResults))
+        }
+        resultsForContract := execResultsByContract[contractAddr]
+        for i, payloadResult := range perPayloadResults {
+          if resultsForContract[i] == nil {
+            resultsForContract[i] = make([]*MulticallExecutionResult, 0, respSlotsPerPayload)
+          }
+          resultsForPayload := resultsForContract[i]
+          resultsForPayload[blockIndex] = payloadResult
+        }
+      }
+    }
+
+    queryResults = append(queryResults, execResultsByContract)
   }
 
   log.Info("Executed eth_multicall", "fast_path", numAccelerated, "slow_path", (execSeq - numAccelerated), "runtime_usec", time.Since(startTime).Microseconds())
 
-  return execResults, nil
+  return queryResults, nil
 }
 
