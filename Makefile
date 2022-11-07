@@ -92,6 +92,9 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
+evm-prod:
+	$(GOBUILD) -o $(GOBIN) ./cmd/evm/...
+
 evm-dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/evm/...
 
