@@ -510,7 +510,7 @@ func runPeer(
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
-			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
+			log.Debug(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
