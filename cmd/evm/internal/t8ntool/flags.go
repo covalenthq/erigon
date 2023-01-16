@@ -119,4 +119,13 @@ var (
 		Usage: "sets the verbosity level",
 		Value: 3,
 	}
+	ServerModeFlag = cli.BoolFlag{
+		Name:  "server.mode",
+		Usage: "should run the tool in \"server\" mode?",
+	}
+	ServerPortFlag = cli.Int64Flag{
+		Name:  "server.port",
+		Usage: "port for the evm server",
+		Value: 3002,
+	}
 )

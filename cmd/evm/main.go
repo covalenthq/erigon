@@ -153,6 +153,8 @@ var stateTransitionCommand = cli.Command{
 		&t8ntool.ForknameFlag,
 		&t8ntool.ChainIDFlag,
 		&t8ntool.VerbosityFlag,
+		&t8ntool.ServerModeFlag,
+		&t8ntool.ServerPortFlag,
 	},
 }
 

@@ -96,6 +96,18 @@ type input struct {
 
 func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	isServerMode := ctx.Bool(ServerModeFlag.Name)
+	if isServerMode {
+		port := ctx.Int64(ServerPortFlag.Name)
+		server := EvmServer{}
+		return server.StartServer(ctx, port)
+	} else {
+		return execute(ctx)
+	}
+}
+
+func execute(ctx *cli.Context) error {
 	var (
 		err     error
 		baseDir = ""
@@ -306,7 +318,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
