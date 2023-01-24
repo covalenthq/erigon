@@ -514,11 +514,13 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 
 	switch txJson.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr = libcommon.Address{}
-		if txJson.To != nil {
-			toAddr = *txJson.To
+		var legacyTx *types.LegacyTx
+		if txJson.To == nil {
+			legacyTx = types.NewContractCreation(uint64(txJson.Nonce), value, uint64(txJson.Gas), gasPrice, txJson.Input)
+		} else {
+			legacyTx = types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
 		}
-		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
+
 		legacyTx.V.SetFromBig(txJson.V.ToInt())
 		legacyTx.S.SetFromBig(txJson.S.ToInt())
 		legacyTx.R.SetFromBig(txJson.R.ToInt())
@@ -643,6 +645,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	log.Info("Wrote file", "file", location)
+	print("\r")
 	return nil
 }
 
