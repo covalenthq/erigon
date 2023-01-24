@@ -193,8 +193,13 @@ func (tx *Transaction) adaptTransaction() (types.Transaction, error) {
 	}
 	switch tx.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr common.Address = *tx.Recipient
-		legacyTx := types.NewTransaction(uint64(tx.AccountNonce), toAddr, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+		var legacyTx *types.LegacyTx
+		if tx.Recipient == nil {
+			legacyTx = types.NewContractCreation(uint64(tx.AccountNonce), value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+		} else {
+			legacyTx = types.NewTransaction(uint64(tx.AccountNonce), *tx.Recipient, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+		}
+
 		if tx.Sender != nil {
 			legacyTx.CommonTx.SetFrom(*tx.Sender)
 		}
