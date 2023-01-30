@@ -362,6 +362,7 @@ func execute(ctx *cli.Context) error {
 		return h
 	}
 	db := memdb.New("" /* tmpDir */)
+	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
