@@ -11,7 +11,28 @@ Block specimen input is controlled by `--input.replica`. When this is provided, 
 
 Similary, the output is provided in two formats:
 - original: controlled by `output.alloc` (post-process allocations), `output.body` (rlp of transactions body)
-- block result: controlled by <TODO>
+- block result: controlled by `--output.blockresult`
+
+each of the input or output value can be either `stdout`, some filename, or "" (for no output)
+
+example
+```bash
+ ./build/bin/evm t8n --input.replica replica.inp    --output.blockresult result_out --output.body "" --output.alloc "" --output.result ""
+```
+
+## server mode
+evm tool can be started as a http server:
+```bash
+➜ ./build/bin/evm t8n --server.mode                                                                                                         
+INFO[02-02|16:24:55.537] Listening                                port=3002
+```
+
+then you can make curl requests:
+
+```bash
+➜ curl -v -F filedata=@/Users/user/repos/rudder/test-data/block-specimen/15892740.specimen.json http://127.0.0.1:3002/process
+```
+the input is a block specimen in json format.
 
 
 ## Development
