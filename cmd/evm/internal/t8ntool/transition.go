@@ -341,6 +341,7 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 	db := memdb.New()
+	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
