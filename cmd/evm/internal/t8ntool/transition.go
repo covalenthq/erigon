@@ -90,6 +90,18 @@ type input struct {
 
 func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	isServerMode := ctx.Bool(ServerModeFlag.Name)
+	if isServerMode {
+		port := ctx.Int64(ServerPortFlag.Name)
+		server := EvmServer{}
+		return server.StartServer(ctx, port)
+	} else {
+		return execute(ctx)
+	}
+}
+
+func execute(ctx *cli.Context) error {
 	var (
 		err     error
 		baseDir = ""
