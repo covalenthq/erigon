@@ -14,7 +14,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 type EvmServer struct {

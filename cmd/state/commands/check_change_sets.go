@@ -11,26 +11,28 @@ import (
 	"syscall"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 var (
-	historyfile string
-	nocheck     bool
+	historyfile    string
+	nocheck        bool
+	transactionsV3 bool
 )
 
 func init() {
@@ -39,6 +41,7 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
+	checkChangeSetsCmd.Flags().BoolVar(&transactionsV3, "experimental.transactions.v3", false, "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -47,13 +50,13 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, transactionV3 bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -72,19 +75,13 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if err != nil {
 		return err
 	}
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionV3)
+
 	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb
@@ -121,7 +118,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {
 
@@ -146,7 +143,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-		reader := state.NewPlainState(historyTx, blockNum)
+		reader := state.NewPlainState(historyTx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
@@ -157,7 +154,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			h, e := blockReader.Header(ctx, rwtx, hash, number)
 			if e != nil {
 				panic(e)
@@ -183,7 +180,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = changeset.ForPrefix(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.AccountChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(accountChanges.Changes) {
 					if len(v) != 0 {
 						fmt.Printf("Unexpected account changes in block %d\n", blockNum)
@@ -226,11 +223,11 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				return err
 			}
 			if expectedStorageChanges == nil {
-				expectedStorageChanges = changeset.NewChangeSet()
+				expectedStorageChanges = historyv2.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
 			match = true
-			err = changeset.ForPrefix(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.StorageChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(expectedStorageChanges.Changes) {
 					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 					fmt.Printf("0x%x: %x\n", k, v)

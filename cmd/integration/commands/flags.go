@@ -1,10 +1,10 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -15,23 +15,24 @@ var (
 	block, pruneTo, unwind         uint64
 	unwindEvery                    uint64
 	batchSizeStr                   string
-	reset                          bool
+	reset, warmup                  bool
 	bucket                         string
 	datadirCli, toChaindata        string
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
+	HeimdallgRPCAddress            string
 	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
+	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
-	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
 
-	_forceSetHistoryV2 bool
-	workers            uint64
+	_forceSetHistoryV3    bool
+	workers, reconWorkers uint64
 )
 
 func must(err error) {
@@ -85,6 +86,7 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -92,14 +94,15 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDataDir2(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	// --datadir is required, but no --chain flag: read chainConfig from db instead
+	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadirCli, "datadir", "", "data directory for temporary ELT files")
 	must(cmd.MarkFlagRequired("datadir"))
 	must(cmd.MarkFlagDirname("datadir"))
 
@@ -110,12 +113,12 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withBatchSize(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
+	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
-	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
+	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
 }
 
 func withMigration(cmd *cobra.Command) {
@@ -127,7 +130,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, sepolia, etc.)")
 	must(cmd.MarkFlagRequired("chain"))
 }
 
@@ -136,5 +139,6 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "workers", 1, "")
+	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
+	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
 }

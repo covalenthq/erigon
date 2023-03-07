@@ -11,6 +11,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -19,16 +22,22 @@ import (
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -38,12 +47,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -63,7 +71,7 @@ type MockSentry struct {
 	Dirs           datadir.Dirs
 	Engine         consensus.Engine
 	gspec          *core.Genesis
-	ChainConfig    *params.ChainConfig
+	ChainConfig    *chain.Config
 	Sync           *stagedsync.Sync
 	MiningSync     *stagedsync.Sync
 	PendingBlocks  chan *types.Block
@@ -73,14 +81,14 @@ type MockSentry struct {
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
 	PeerId         *ptypes.H512
-	UpdateHead     func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	UpdateHead     func(Ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int)
 	streams        map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages   []*proto_sentry.OutboundMessageData
 	StreamWg       sync.WaitGroup
 	ReceiveWg      sync.WaitGroup
-	Address        common.Address
+	Address        libcommon.Address
 
-	Notifications *stagedsync.Notifications
+	Notifications *shards.Notifications
 
 	// TxPool
 	TxPoolFetch      *txpool.Fetch
@@ -89,8 +97,10 @@ type MockSentry struct {
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
 
-	HistoryV2 bool
-	agg       *libstate.Aggregator22
+	HistoryV3      bool
+	TransactionsV3 bool
+	agg            *libstate.AggregatorV3
+	BlockSnapshots *snapshotsync.RoSnapshots
 }
 
 func (ms *MockSentry) Close() {
@@ -98,9 +108,17 @@ func (ms *MockSentry) Close() {
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
-	ms.DB.Close()
-	if ms.HistoryV2 {
+	if ms.Engine != nil {
+		ms.Engine.Close()
+	}
+	if ms.BlockSnapshots != nil {
+		ms.BlockSnapshots.Close()
+	}
+	if ms.agg != nil {
 		ms.agg.Close()
+	}
+	if ms.DB != nil {
+		ms.DB.Close()
 	}
 }
 
@@ -127,7 +145,7 @@ func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRe
 }
 
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
-	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH68}, nil
 }
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -206,12 +224,49 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	dirs := datadir.New(tmpdir)
 	var err error
 
-	db := memdb.New()
+	cfg := ethconfig.Defaults
+	cfg.HistoryV3 = ethconfig.EnableHistoryV3InTest
+	cfg.StateStream = true
+	cfg.BatchSize = 1 * datasize.MB
+	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.DeprecatedTxPool.Disable = !withTxPool
+	cfg.DeprecatedTxPool.StartOnInit = true
+
+	var db kv.RwDB
+	if t != nil {
+		db = memdb.NewTestDB(t)
+	} else {
+		db = memdb.New(tmpdir)
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
+		return nil
+	})
+
+	var agg *libstate.AggregatorV3
+	if cfg.HistoryV3 {
+		dir.MustExist(dirs.SnapHistory)
+		agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		if err != nil {
+			panic(err)
+		}
+		if err := agg.OpenFolder(); err != nil {
+			panic(err)
+		}
+	}
+
+	if cfg.HistoryV3 {
+		db, err = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName])
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		t:           t,
 		Log:         log.New(),
 		Dirs:        dirs,
@@ -219,72 +274,50 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		gspec:       gspec,
 		ChainConfig: gspec.Config,
 		Key:         key,
-		Notifications: &stagedsync.Notifications{
-			Events:               privateapi.NewEvents(),
-			Accumulator:          shards.NewAccumulator(gspec.Config),
+		Notifications: &shards.Notifications{
+			Events:               shards.NewEvents(),
+			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
-		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int) {
 		},
-		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		HistoryV2: ethconfig.EnableHistoryV2InTest,
+		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		BlockSnapshots: allSnapshots,
+		HistoryV3:      cfg.HistoryV3,
+		TransactionsV3: cfg.TransactionsV3,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
 	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots, mock.TransactionsV3)
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
-	cfg := ethconfig.Defaults
-	cfg.HistoryV2 = mock.HistoryV2
-	cfg.StateStream = true
-	cfg.BatchSize = 1 * datasize.MB
-	cfg.Sync.BodyDownloadTimeoutSeconds = 10
-	cfg.DeprecatedTxPool.Disable = !withTxPool
-	cfg.DeprecatedTxPool.StartOnInit = true
 
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
-		_, _ = rawdb.HistoryV2.WriteOnce(tx, cfg.HistoryV2)
-		return nil
-	})
-
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
-
-	if cfg.HistoryV2 {
-		dir.MustExist(dirs.SnapHistory)
-		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
-		if err != nil {
-			panic(err)
-		}
-		if err := mock.agg.ReopenFiles(); err != nil {
-			panic(err)
-		}
-
-	}
-
-	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH68, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
+	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig
-		newTxs := make(chan types2.Hashes, 1024)
+		newTxs := make(chan types2.Announcements, 1024)
 		if t != nil {
 			t.Cleanup(func() {
 				close(newTxs)
 			})
 		}
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+		shanghaiTime := mock.ChainConfig.ShanghaiTime
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolDB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB(tmpdir)
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
@@ -302,16 +335,37 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec)
-	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, "")
+	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
 		} else {
 			panic(err)
 		}
 	}
-	blockReader := snapshotsync.NewBlockReader()
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+		notifications *shards.Notifications) error {
+		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
+		stateSync, err := NewInMemoryExecution(ctx, mock.DB, &ethconfig.Defaults, mock.sentriesClient, dirs, notifications, allSnapshots, agg)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := StateStep(ctx, batch, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
+			log.Warn("Could not validate block", "err", err)
+			return err
+		}
+		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		if err != nil {
+			return err
+		}
+		if progress < header.Number.Uint64() {
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
+		}
+		return nil
+	}
+	forkValidator := engineapi.NewForkValidator(1, inMemoryExecution, dirs.Tmp)
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,
@@ -324,7 +378,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		cfg.Sync,
 		blockReader,
 		false,
-		nil,
+		forkValidator,
 	)
 
 	mock.sentriesClient.IsMock = true
@@ -338,15 +392,22 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
-	isBor := mock.ChainConfig.Bor != nil
-	var sprint uint64
-	if isBor {
-		sprint = mock.ChainConfig.Bor.Sprint
-	}
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
-		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs.Tmp, allSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV2, mock.agg),
+		stagedsync.DefaultStages(mock.Ctx,
+			stagedsync.StageSnapshotsCfg(
+				mock.DB,
+				*mock.ChainConfig,
+				dirs,
+				mock.BlockSnapshots,
+				blockRetire,
+				snapshotsDownloader,
+				blockReader,
+				mock.Notifications.Events,
+				mock.Engine,
+				mock.HistoryV3,
+				mock.agg,
+			),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,
@@ -357,19 +418,29 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				false,
 				0,
 				nil,
-				allSnapshots,
+				mock.BlockSnapshots,
 				blockReader,
 				dirs.Tmp,
 				mock.Notifications,
-				engineapi.NewForkValidatorMock(1)),
+				engineapi.NewForkValidatorMock(1),
+			),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
-			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, cfg.BatchSize, allSnapshots, blockReader, cfg.HistoryV2),
-			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil),
+			stagedsync.StageBodiesCfg(mock.DB,
+				mock.sentriesClient.Bd,
+				sendBodyRequest,
+				penalize,
+				blockPropagator,
+				cfg.Sync.BodyDownloadTimeoutSeconds,
+				*mock.ChainConfig,
+				mock.BlockSnapshots,
+				blockReader,
+				cfg.HistoryV3,
+				cfg.TransactionsV3,
+			),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -381,21 +452,21 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.Notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				/*exec22=*/ cfg.HistoryV2,
+				/*exec22=*/ cfg.HistoryV3,
 				dirs,
 				blockReader,
 				mock.sentriesClient.Hd,
 				mock.gspec,
-				1,
+				ethconfig.Defaults.Sync,
 				mock.agg,
 			),
-			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV2, mock.agg),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, mock.agg),
+			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, allSnapshots, isBor, sprint),
-			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
+			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -420,9 +491,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0),
-			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV2, mock.agg),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, mock.agg),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
+			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
@@ -447,7 +518,7 @@ func Mock(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllEthashProtocolChanges
+	chainConfig := params.TestChainConfig
 	gspec := &core.Genesis{
 		Config: chainConfig,
 		Alloc: core.GenesisAlloc{
@@ -461,7 +532,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllEthashProtocolChanges
+	chainConfig := params.TestChainConfig
 	gspec := &core.Genesis{
 		Config: chainConfig,
 		Alloc: core.GenesisAlloc{
@@ -476,8 +547,8 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllEthashProtocolChanges
-	chainConfig.TerminalTotalDifficulty = common.Big0
+	chainConfig := params.AllProtocolChanges
+	chainConfig.TerminalTotalDifficulty = libcommon.Big0
 	gspec := &core.Genesis{
 		Config: chainConfig,
 		Alloc: core.GenesisAlloc{
@@ -485,6 +556,23 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 		},
 	}
 	return MockWithGenesis(t, gspec, key, withPosDownloader)
+}
+
+func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
+	funds := big.NewInt(1 * params.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	chainConfig := params.TestChainAuraConfig
+	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig.TerminalTotalDifficultyPassed = true
+	gspec := &core.Genesis{
+		Config: chainConfig,
+		Alloc: core.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+	engine := ethconsensusconfig.CreateConsensusEngine(chainConfig, log.New(), chainConfig.Aura, nil, true, "", "", true, "", nil, false /* readonly */, nil)
+	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 
 func (ms *MockSentry) EnableLogs() {
@@ -541,7 +629,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	// Send all the bodies
 	packet := make(eth.BlockBodiesPacket, n)
 	for i, block := range chain.Blocks[0:n] {
-		packet[i] = (*eth.BlockBody)(block.Body())
+		packet[i] = block.Body()
 	}
 	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
 		RequestId:         1,
@@ -559,11 +647,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := false
-	highestSeenHeader := chain.Blocks[n-1].NumberU64()
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -579,12 +666,14 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	for i := n; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
 		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
 	initialCycle := false
-	highestSeenHeader := chain.TopBlock.NumberU64()
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead)
 	if err != nil {
 		return err
 	}
@@ -597,7 +686,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead)
 	if err != nil {
 		return err
 	}
@@ -633,6 +722,20 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
+	//if ms.HistoryV3 {
+	//if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
+	//	return err
+	//}
+	//if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
+	//	ms.agg.SetTx(tx)
+	//	if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
+	//		return err
+	//	}
+	//	return nil
+	//}); err != nil {
+	//	return err
+	//}
+	//}
 	return nil
 }
 
@@ -652,27 +755,18 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
-	if ms.HistoryV2 {
-		aggCtx := ms.agg.MakeContext()
-		aggCtx.SetTx(tx)
-		r := state.NewHistoryReader22(aggCtx)
-		r.SetTx(tx)
-		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
-		if err != nil {
-			panic(err)
-		}
-		r.SetTxNum(minTxNum)
-		return r
+func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
+	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.HistoryV3, ms.ChainConfig.ChainName)
+	if err != nil {
+		panic(err)
 	}
-
-	return state.NewPlainState(tx, blockNum)
+	return r
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewPlainStateReader(tx)
 }
 
-func (ms *MockSentry) HistoryV2Components() *libstate.Aggregator22 {
+func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg
 }

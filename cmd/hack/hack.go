@@ -20,18 +20,28 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	librlp "github.com/ledgerwatch/erigon-lib/rlp"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+
+	"github.com/ledgerwatch/log/v3"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
@@ -39,19 +49,16 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-const ASSERT = false
-
 var (
-	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 	block      = flag.Int("block", 1, "specifies a block number for operation")
@@ -84,7 +91,7 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 }
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
-func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
+func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
@@ -95,7 +102,7 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 				panic(err)
 			}
 			header := rawdb.ReadHeader(tx, hash, i)
-			if header.Root == stateRoot || stateRoot == (common.Hash{}) {
+			if header.Root == stateRoot || stateRoot == (libcommon.Hash{}) {
 				fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
 				fmt.Printf("Header.Root: %x\n", header.Root)
 				fmt.Printf("Header.TxHash: %x\n", header.TxHash)
@@ -108,7 +115,7 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 
 func getCurrentBlockNumber(tx kv.Tx) *uint64 {
 	hash := rawdb.ReadHeadBlockHash(tx)
-	if hash == (common.Hash{}) {
+	if hash == (libcommon.Hash{}) {
 		return nil
 	}
 	return rawdb.ReadHeaderNumber(tx, hash)
@@ -151,7 +158,7 @@ func printTxHashes(chaindata string, block uint64) error {
 	return nil
 }
 
-func readAccount(chaindata string, account common.Address) error {
+func readAccount(chaindata string, account libcommon.Address) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 
@@ -201,13 +208,41 @@ func readAccount(chaindata string, account common.Address) error {
 	return nil
 }
 
-func nextIncarnation(chaindata string, addrHash common.Hash) {
+func readAccountAtVersion(chaindata string, account string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	ps := state.NewPlainState(tx, block, nil)
+
+	addr := libcommon.HexToAddress(account)
+	acc, err := ps.ReadAccountData(addr)
+	if err != nil {
+		return err
+	}
+
+	asJson, err := json.Marshal(acc)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("account: %s", asJson)
+
+	return nil
+}
+
+func nextIncarnation(chaindata string, addrHash libcommon.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits = 8 * common.HashLength
+	var incarnationBytes [length.Incarnation]byte
+	startkey := make([]byte, length.Hash+length.Incarnation+length.Hash)
+	var fixedbits = 8 * length.Hash
 	copy(startkey, addrHash[:])
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.HashedStorage)
@@ -217,7 +252,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 		defer c.Close()
 		return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			fmt.Printf("Incarnation(z): %d\n", 0)
-			copy(incarnationBytes[:], k[common.HashLength:])
+			copy(incarnationBytes[:], k[length.Hash:])
 			found = true
 			return false, nil
 		})
@@ -314,7 +349,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	}
 	defer tx.Rollback()
 
-	if err := changeset.ForEach(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.AccountChangeSet, hexutility.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -334,7 +369,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.ForEach(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.StorageChangeSet, hexutility.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -374,13 +409,13 @@ func extractCode(chaindata string) error {
 func iterateOverCode(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	hashes := make(map[common.Hash][]byte)
+	hashes := make(map[libcommon.Hash][]byte)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
 		// This is a mapping of CodeHash => Byte code
 		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[common.BytesToHash(k)] = common.CopyBytes(v)
+				hashes[libcommon.BytesToHash(k)] = common.CopyBytes(v)
 			}
 			return nil
 		}); err != nil {
@@ -388,7 +423,7 @@ func iterateOverCode(chaindata string) error {
 		}
 		// This is a mapping of contractAddress + incarnation => CodeHash
 		if err := tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-			hash := common.BytesToHash(v)
+			hash := libcommon.BytesToHash(v)
 			if code, ok := hashes[hash]; ok {
 				fmt.Printf("address: %x: %x\n", k[:20], code)
 			}
@@ -443,7 +478,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 				return err
 			}
 
-			if hash == (common.Hash{}) {
+			if hash == (libcommon.Hash{}) {
 				break
 			}
 
@@ -473,14 +508,14 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
+	blockEncoded := hexutility.EncodeTs(block)
 	blockTotal := getBlockTotal(tx, block, blockTotalOrOffset)
 	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
+		blockHash := libcommon.BytesToHash(k[8:])
 		var header types.Header
 		if err = rlp.DecodeBytes(v, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %w", v, err)
@@ -491,8 +526,53 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 	return nil
 }
 
-func extractBodies(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
+func extractBodies(datadir string) error {
+	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
+		Enabled:    true,
+		KeepBlocks: true,
+		Produce:    false,
+	}, filepath.Join(datadir, "snapshots"))
+	snaps.ReopenFolder()
+	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
+		for _, sn := range sns {
+			var firstBlockNum, firstBaseTxNum, firstAmount uint64
+			var lastBlockNum, lastBaseTxNum, lastAmount uint64
+			var prevBlockNum, prevBaseTxNum, prevAmount uint64
+			first := true
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+				if first {
+					firstBlockNum = blockNum
+					firstBaseTxNum = baseTxNum
+					firstAmount = txAmount
+					first = false
+				} else {
+					if blockNum != prevBlockNum+1 {
+						fmt.Printf("Discount block Num: %d => %d\n", prevBlockNum, blockNum)
+					}
+					if baseTxNum != prevBaseTxNum+prevAmount {
+						fmt.Printf("Wrong baseTxNum: %d+%d => %d\n", prevBaseTxNum, prevAmount, baseTxNum)
+					}
+				}
+				prevBlockNum = blockNum
+				lastBlockNum = blockNum
+				prevBaseTxNum = baseTxNum
+				lastBaseTxNum = baseTxNum
+				prevAmount = txAmount
+				lastAmount = txAmount
+				return nil
+			})
+			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
+		}
+		return nil
+	})
+	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+		fmt.Printf("txTxnID = %d\n", lastTxnID)
+		return nil
+	}); err != nil {
+		return err
+	}
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -504,16 +584,15 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
 	i := 0
 	var txId uint64
-	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
-		var hash common.Hash
+		blockHash := libcommon.BytesToHash(k[8:])
+		var hash libcommon.Hash
 		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
 			return err
 		}
@@ -524,17 +603,15 @@ func extractBodies(chaindata string, block uint64) error {
 			continue
 		}
 		i++
-		if txId == 0 {
-			txId = baseTxId
-		} else {
+		if txId > 0 {
 			if txId != baseTxId {
 				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
 			}
 		}
-		txId += uint64(txAmount) + 2
-		//if i == 1 {
-		//	break
-		//}
+		txId = baseTxId + uint64(txAmount) + 2
+		if i == 50 {
+			break
+		}
 	}
 	return nil
 }
@@ -619,7 +696,7 @@ func readCallTraces(chaindata string, block uint64) error {
 	if err2 != nil {
 		return err2
 	}
-	var acc = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
+	var acc = libcommon.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
 	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
 		bm := roaring64.New()
 		_, err = bm.ReadFrom(bytes.NewReader(v))
@@ -956,7 +1033,7 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	blockNum, err := changeset.AvailableFrom(tx)
+	blockNum, err := historyv2.AvailableFrom(tx)
 	if err != nil {
 		return err
 	}
@@ -971,11 +1048,11 @@ func scanReceipts2(chaindata string) error {
 		case <-logEvery.C:
 			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
 		}
-		var hash common.Hash
+		var hash libcommon.Hash
 		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
 			return err
 		}
-		if hash == (common.Hash{}) {
+		if hash == (libcommon.Hash{}) {
 			break
 		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
@@ -1015,7 +1092,7 @@ func devTx(chaindata string) error {
 	}
 	defer tx.Rollback()
 	cc := tool.ChainConfig(tx)
-	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
+	txn := types.NewTransaction(2, libcommon.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
 	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
 	tool.Check(err)
 	buf := bytes.NewBuffer(nil)
@@ -1026,12 +1103,10 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	var chainConfig *params.ChainConfig
+	var chainConfig *chain.Config
 	switch name {
 	case "mainnet":
 		chainConfig = params.MainnetChainConfig
-	case "ropsten":
-		chainConfig = params.RopstenChainConfig
 	case "sepolia":
 		chainConfig = params.SepoliaChainConfig
 	case "rinkeby":
@@ -1046,14 +1121,14 @@ func chainConfig(name string) error {
 		chainConfig = params.ChapelChainConfig
 	case "rialto":
 		chainConfig = params.RialtoChainConfig
-	case "fermion":
-		chainConfig = params.FermionChainConfig
 	case "mumbai":
 		chainConfig = params.MumbaiChainConfig
 	case "bor-mainnet":
 		chainConfig = params.BorMainnetChainConfig
 	case "gnosis":
 		chainConfig = params.GnosisChainConfig
+	case "chiado":
+		chainConfig = params.ChiadoChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}
@@ -1127,6 +1202,16 @@ func findPrefix(chaindata string) error {
 	return nil
 }
 
+func rmSnKey(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
+		return nil
+	})
+}
+
 func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -1143,7 +1228,7 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	defer logs.Close()
 
 	reader := bytes.NewReader(nil)
-	addrs := map[common.Address]int{}
+	addrs := map[libcommon.Address]int{}
 	topics := map[string]int{}
 
 	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
@@ -1169,7 +1254,7 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 			}
 		}
 	}
-	addrsInv := map[int][]common.Address{}
+	addrsInv := map[int][]libcommon.Address{}
 	topicsInv := map[int][]string{}
 	for a, c := range addrs {
 		addrsInv[c] = append(addrsInv[c], a)
@@ -1228,8 +1313,9 @@ func iterate(filename string, prefix string) error {
 			ef, _ := eliasfano32.ReadEliasFano(val)
 			efIt := ef.Iterator()
 			fmt.Printf("[%x] =>", key)
+			cnt := 0
 			for efIt.HasNext() {
-				txNum := efIt.Next()
+				txNum, _ := efIt.Next()
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				offset := r.Lookup2(txKey[:], key)
@@ -1238,6 +1324,11 @@ func iterate(filename string, prefix string) error {
 				fmt.Printf(" %d", txNum)
 				if len(v) == 0 {
 					fmt.Printf("*")
+				}
+				cnt++
+				if cnt == 16 {
+					fmt.Printf("\n")
+					cnt = 0
 				}
 			}
 			fmt.Printf("\n")
@@ -1248,10 +1339,71 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
+func readSeg(chaindata string) error {
+	vDecomp, err := compress.NewDecompressor(chaindata)
+	if err != nil {
+		return err
+	}
+	defer vDecomp.Close()
+	g := vDecomp.MakeGetter()
+	var buf []byte
+	var count int
+	for g.HasNext() {
+		g.Next(buf[:0])
+		count++
+	}
+	fmt.Printf("count=%d\n", count)
+	return nil
+}
+
+func dumpState(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			fmt.Printf("%x %x\n", k, v)
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type NewPooledTransactionHashesPacket68 struct {
+	Types  []byte
+	Sizes  []uint32
+	Hashes []libcommon.Hash
+}
+
+func rlptest() error {
+	var p = NewPooledTransactionHashesPacket68{
+		Types:  []byte{44, 200},
+		Sizes:  []uint32{56, 57680},
+		Hashes: []libcommon.Hash{{}, {}},
+	}
+	b, err := rlp.EncodeToBytes(&p)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%x\n", b)
+	var hashes []byte
+	for _, h := range p.Hashes {
+		hashes = append(hashes, h[:]...)
+	}
+	b = make([]byte, librlp.AnnouncementsLen(p.Types, p.Sizes, hashes))
+	l := librlp.EncodeAnnouncements(p.Types, p.Sizes, hashes, b)
+	fmt.Printf("%x\n%d %d\n", b, len(b), l)
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
+
+	_ = logging.GetLogger("hack")
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -1266,7 +1418,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+		if err := http.ListenAndServe("localhost:6960", nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
@@ -1277,15 +1429,15 @@ func main() {
 		flow.TestGenCfg()
 
 	case "testBlockHashes":
-		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
+		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
 	case "readAccount":
-		if err := readAccount(*chaindata, common.HexToAddress(*account)); err != nil {
+		if err := readAccount(*chaindata, libcommon.HexToAddress(*account)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 
 	case "nextIncarnation":
-		nextIncarnation(*chaindata, common.HexToHash(*account))
+		nextIncarnation(*chaindata, libcommon.HexToHash(*account))
 
 	case "dumpStorage":
 		dumpStorage()
@@ -1324,7 +1476,7 @@ func main() {
 		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
-		err = extractBodies(*chaindata, uint64(*block))
+		err = extractBodies(*chaindata)
 
 	case "repairCurrent":
 		repairCurrent()
@@ -1372,6 +1524,16 @@ func main() {
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
+	case "rmSnKey":
+		err = rmSnKey(*chaindata)
+	case "readSeg":
+		err = readSeg(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
+	case "rlptest":
+		err = rlptest()
+	case "readAccountAtVersion":
+		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
 
 	if err != nil {

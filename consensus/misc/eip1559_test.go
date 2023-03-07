@@ -20,53 +20,21 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 // copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
 // do not use e.g. SetInt() on the numbers. For testing only
-func copyConfig(original *params.ChainConfig) *params.ChainConfig {
-	return &params.ChainConfig{
-		ChainName:                     original.ChainName,
-		ChainID:                       original.ChainID,
-		Consensus:                     original.Consensus,
-		HomesteadBlock:                original.HomesteadBlock,
-		DAOForkBlock:                  original.DAOForkBlock,
-		DAOForkSupport:                original.DAOForkSupport,
-		TangerineWhistleBlock:         original.TangerineWhistleBlock,
-		TangerineWhistleHash:          original.TangerineWhistleHash,
-		SpuriousDragonBlock:           original.SpuriousDragonBlock,
-		ByzantiumBlock:                original.ByzantiumBlock,
-		ConstantinopleBlock:           original.ConstantinopleBlock,
-		PetersburgBlock:               original.PetersburgBlock,
-		IstanbulBlock:                 original.IstanbulBlock,
-		MuirGlacierBlock:              original.MuirGlacierBlock,
-		BerlinBlock:                   original.BerlinBlock,
-		LondonBlock:                   original.LondonBlock,
-		ArrowGlacierBlock:             original.ArrowGlacierBlock,
-		GrayGlacierBlock:              original.GrayGlacierBlock,
-		TerminalTotalDifficulty:       original.TerminalTotalDifficulty,
-		TerminalTotalDifficultyPassed: original.TerminalTotalDifficultyPassed,
-		MergeNetsplitBlock:            original.MergeNetsplitBlock,
-		ShanghaiBlock:                 original.ShanghaiBlock,
-		CancunBlock:                   original.CancunBlock,
-		RamanujanBlock:                original.RamanujanBlock,
-		NielsBlock:                    original.NielsBlock,
-		MirrorSyncBlock:               original.MirrorSyncBlock,
-		BrunoBlock:                    original.BrunoBlock,
-		EulerBlock:                    original.EulerBlock,
-		GibbsBlock:                    original.GibbsBlock,
-		Ethash:                        original.Ethash,
-		Clique:                        original.Clique,
-		Aura:                          original.Aura,
-		Parlia:                        original.Parlia,
-		Bor:                           original.Bor,
-	}
+func copyConfig(original *chain.Config) *chain.Config {
+	copy := *original
+	return &copy
 }
 
-func config() *params.ChainConfig {
+func config() *chain.Config {
 	config := copyConfig(params.TestChainConfig)
 	config.LondonBlock = big.NewInt(5)
 	return config

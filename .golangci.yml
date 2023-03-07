@@ -17,6 +17,7 @@ linters:
     - gosec
 #    - forcetypeassert
     - prealloc
+    - unconvert
 
 linters-settings:
   gocritic:
@@ -122,6 +123,10 @@ issues:
         - gosec
         - gocritic
     - path: p2p/simulations
+      linters:
+        - gosec
+        - gocritic
+    - path: p2p/dnsdisc
       linters:
         - gosec
         - gocritic

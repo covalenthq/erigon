@@ -5,9 +5,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -16,8 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEmptyStageSync(t *testing.T) {
@@ -28,7 +29,7 @@ func TestHeaderStep(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -56,8 +57,7 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := true
-	highestSeenHeader := chain.TopBlock.NumberU64()
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -67,7 +67,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	require, m := require.New(t), stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
 	{ // Do 1 step to start txPool
@@ -95,15 +95,14 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle := true
-		highestSeenHeader := chain.TopBlock.NumberU64()
-		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	chain, err = core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
 		gen.AddTx(tx)
 	}, false /* intermediateHashes */)
@@ -116,9 +115,9 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_TRANSACTIONS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(err)
 	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync)
+	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync, "")
 	require.NoError(err)
 
 	got := <-m.PendingBlocks
@@ -131,7 +130,7 @@ func TestReorg(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -164,27 +163,26 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle := true
-	highestSeenHeader := chain.TopBlock.NumberU64()
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 
 	// Now generate three competing branches, one short and two longer ones
 	short, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	long1, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
+		b.SetCoinbase(libcommon.Address{2}) // Need to make headers different from short branch
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
 	long2, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
+		b.SetCoinbase(libcommon.Address{3}) // Need to make headers different from short branch and another long branch
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
@@ -217,9 +215,8 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = short.TopBlock.NumberU64()
 	initialCycle = false
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,15 +259,14 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	highestSeenHeader = long1.TopBlock.NumberU64()
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
 	short2, err := core.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
@@ -299,9 +295,8 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = short2.TopBlock.NumberU64()
 	initialCycle = false
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -310,14 +305,14 @@ func TestAnchorReplace(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -325,9 +320,9 @@ func TestAnchorReplace(t *testing.T) {
 
 	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *core.BlockGen) {
 		if i < 10 {
-			b.SetCoinbase(common.Address{1})
+			b.SetCoinbase(libcommon.Address{1})
 		} else {
-			b.SetCoinbase(common.Address{2})
+			b.SetCoinbase(libcommon.Address{2})
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -396,9 +391,8 @@ func TestAnchorReplace(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader := long.TopBlock.NumberU64()
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -406,14 +400,14 @@ func TestAnchorReplace(t *testing.T) {
 func TestAnchorReplace2(t *testing.T) {
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -421,9 +415,9 @@ func TestAnchorReplace2(t *testing.T) {
 
 	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 30, func(i int, b *core.BlockGen) {
 		if i < 10 {
-			b.SetCoinbase(common.Address{1})
+			b.SetCoinbase(libcommon.Address{1})
 		} else {
-			b.SetCoinbase(common.Address{2})
+			b.SetCoinbase(libcommon.Address{2})
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -501,9 +495,8 @@ func TestAnchorReplace2(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader := long.TopBlock.NumberU64()
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -520,7 +513,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -535,14 +528,14 @@ func TestBogusForkchoice(t *testing.T) {
 
 	// Bogus forkChoice: head points to rubbish
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
-		HeadBlockHash:      common.HexToHash("11111111111111111111"),
+		HeadBlockHash:      libcommon.HexToHash("11111111111111111111"),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -557,7 +550,7 @@ func TestBogusForkchoice(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -569,7 +562,7 @@ func TestPoSDownloader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
@@ -577,7 +570,7 @@ func TestPoSDownloader(t *testing.T) {
 	m.SendPayloadRequest(chain.TopBlock)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -597,15 +590,14 @@ func TestPoSDownloader(t *testing.T) {
 	m.ReceiveWg.Wait()
 
 	// First cycle: save the downloaded header
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
 	// Second cycle: process the previous beacon request
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
-	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	// Point forkChoice to the head
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -614,9 +606,10 @@ func TestPoSDownloader(t *testing.T) {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	payloadStatus = m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
@@ -628,24 +621,24 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
 	lastValidHeader := chain.Headers[0]
 
 	invalidParent := types.CopyHeader(chain.Headers[1])
-	invalidParent.Difficulty = common.Big1
+	invalidParent.Difficulty = libcommon.Big1
 
 	invalidTip := chain.TopBlock.Header()
 	invalidTip.ParentHash = invalidParent.Hash()
 
 	// Send a payload with the parent missing
-	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil)
+	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil, nil)
 	m.SendPayloadRequest(payloadMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -664,7 +657,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	}
 	m.ReceiveWg.Wait()
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -675,10 +668,148 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
+	_, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(t, err)
 
 	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
 	assert.True(t, bad)
 	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
+}
+
+func TestPOSWrontTrieRootReorgs(t *testing.T) {
+	t.Skip("Need some fixes for memory mutation to support DupSort")
+	//defer log.Root().SetHandler(log.Root().GetHandler())
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	require := require.New(t)
+	m := stages.MockWithZeroTTDGnosis(t, true)
+
+	// One empty block
+	chain0, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
+		gen.SetDifficulty(big.NewInt(0))
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// One empty block, one block with transaction for 10k wei
+	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
+		gen.SetDifficulty(big.NewInt(0))
+		if i == 1 {
+			// In block 1, addr1 sends addr2 10_000 wei.
+			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas,
+				uint256.NewInt(1_000_000_000), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			require.NoError(err)
+			gen.AddTx(tx)
+		}
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// One empty block, one block with transaction for 20k wei
+	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
+		gen.SetDifficulty(big.NewInt(0))
+		if i == 1 {
+			// In block 1, addr1 sends addr2 20_000 wei.
+			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(20_000), params.TxGas,
+				uint256.NewInt(1_000_000_000), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			require.NoError(err)
+			gen.AddTx(tx)
+		}
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// 3 empty blocks
+	chain3, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *core.BlockGen) {
+		gen.SetDifficulty(big.NewInt(0))
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	//------------------------------------------
+	m.SendPayloadRequest(chain0.TopBlock)
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus0 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain0.TopBlock.Hash(),
+		SafeBlockHash:      chain0.TopBlock.Hash(),
+		FinalizedBlockHash: chain0.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
+	payloadStatus0 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
+	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	m.SendPayloadRequest(chain1.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus1 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus1.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain1.TopBlock.Hash(),
+		SafeBlockHash:      chain1.TopBlock.Hash(),
+		FinalizedBlockHash: chain1.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain1.TopBlock.Hash(), headBlockHash)
+	payloadStatus1 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus1.Status)
+	assert.Equal(t, chain1.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	m.SendPayloadRequest(chain2.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus2 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus2.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain2.TopBlock.Hash(),
+		SafeBlockHash:      chain2.TopBlock.Hash(),
+		FinalizedBlockHash: chain2.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain2.TopBlock.Hash(), headBlockHash)
+	payloadStatus2 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus2.Status)
+	assert.Equal(t, chain2.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	preTop3 := chain3.Blocks[chain3.Length()-2]
+	m.SendPayloadRequest(preTop3)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus3 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	m.SendPayloadRequest(chain3.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus3 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain3.TopBlock.Hash(),
+		SafeBlockHash:      chain3.TopBlock.Hash(),
+		FinalizedBlockHash: chain3.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain3.TopBlock.Hash(), headBlockHash)
+	payloadStatus3 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	assert.Equal(t, chain3.TopBlock.Hash(), headBlockHash)
 }

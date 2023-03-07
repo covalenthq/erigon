@@ -1,15 +1,16 @@
 package stagedsync
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx) error
+type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx, quiet bool) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
@@ -63,10 +64,17 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	return execution, err
 }
 
+// IntermediateHashesAt gets the current state of the "IntermediateHashes" stage.
+// A block is fully validated after the IntermediateHashes stage is passed successfully.
+func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
+	progress, err := stages.GetStageProgress(db, stages.IntermediateHashes)
+	return progress, err
+}
+
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(unwindPoint uint64, badBlock common.Hash)
+	UnwindTo(unwindPoint uint64, badBlock libcommon.Hash)
 }
 
 // UnwindState contains the information about unwind.
@@ -76,7 +84,7 @@ type UnwindState struct {
 	UnwindPoint        uint64
 	CurrentBlockNumber uint64
 	// If unwind is caused by a bad block, this hash is not empty
-	BadBlock common.Hash
+	BadBlock libcommon.Hash
 	state    *Sync
 }
 

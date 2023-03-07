@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"unsafe"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -59,13 +59,13 @@ type Receipt struct {
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.
-	TxHash          common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	ContractAddress common.Address `json:"contractAddress" codec:"-"`
-	GasUsed         uint64         `json:"gasUsed" gencodec:"required" codec:"-"`
+	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	ContractAddress libcommon.Address `json:"contractAddress" codec:"-"`
+	GasUsed         uint64            `json:"gasUsed" gencodec:"required" codec:"-"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash    `json:"blockHash,omitempty" codec:"-"`
+	BlockHash        libcommon.Hash `json:"blockHash,omitempty" codec:"-"`
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty" codec:"-"`
 	TransactionIndex uint           `json:"transactionIndex" codec:"-"`
 }
@@ -99,8 +99,8 @@ type storedReceiptRLP struct {
 type v4StoredReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	TxHash            common.Hash
-	ContractAddress   common.Address
+	TxHash            libcommon.Hash
+	ContractAddress   libcommon.Address
 	Logs              []*LogForStorage
 	GasUsed           uint64
 }
@@ -110,8 +110,8 @@ type v3StoredReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	//Bloom             Bloom
-	//TxHash            common.Hash
-	ContractAddress common.Address
+	//TxHash            libcommon.Hash
+	ContractAddress libcommon.Address
 	Logs            []*LogForStorage
 	GasUsed         uint64
 }
@@ -187,7 +187,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 			return fmt.Errorf("open Topics: %w", err)
 		}
 		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			log.Topics = append(log.Topics, common.Hash{})
+			log.Topics = append(log.Topics, libcommon.Hash{})
 			if len(b) != 32 {
 				return fmt.Errorf("wrong size for Topic: %d", len(b))
 			}
@@ -268,7 +268,7 @@ func (r *Receipt) setStatus(postStateOrStatus []byte) error {
 		r.Status = ReceiptStatusSuccessful
 	case bytes.Equal(postStateOrStatus, receiptStatusFailedRLP):
 		r.Status = ReceiptStatusFailed
-	case len(postStateOrStatus) == len(common.Hash{}):
+	case len(postStateOrStatus) == len(libcommon.Hash{}):
 		r.PostState = postStateOrStatus
 	default:
 		return fmt.Errorf("invalid receipt status %x", postStateOrStatus)
@@ -286,17 +286,6 @@ func (r *Receipt) statusEncoding() []byte {
 	return r.PostState
 }
 
-// Size returns the approximate memory used by all internal contents. It is used
-// to approximate and limit the memory consumption of various caches.
-func (r *Receipt) Size() common.StorageSize {
-	size := common.StorageSize(unsafe.Sizeof(*r)) + common.StorageSize(len(r.PostState))
-	size += common.StorageSize(len(r.Logs)) * common.StorageSize(unsafe.Sizeof(Log{}))
-	for _, log := range r.Logs {
-		size += common.StorageSize(len(log.Topics)*common.HashLength + len(log.Data))
-	}
-	return size
-}
-
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
 	postState := make([]byte, len(r.PostState))
@@ -309,9 +298,9 @@ func (r *Receipt) Copy() *Receipt {
 		logs = append(logs, log.Copy())
 	}
 
-	txHash := common.BytesToHash(r.TxHash.Bytes())
-	contractAddress := common.BytesToAddress(r.ContractAddress.Bytes())
-	blockHash := common.BytesToHash(r.BlockHash.Bytes())
+	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
+	contractAddress := libcommon.BytesToAddress(r.ContractAddress.Bytes())
+	blockHash := libcommon.BytesToHash(r.BlockHash.Bytes())
 	blockNumber := big.NewInt(0).Set(r.BlockNumber)
 
 	return &Receipt{
@@ -462,7 +451,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
+func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transactions, senders []libcommon.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return fmt.Errorf("transaction and receipt count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))

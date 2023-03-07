@@ -3,7 +3,8 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -94,7 +95,7 @@ type SuicideTraceAction struct {
 type RewardTraceAction struct {
 	Author     common.Address `json:"author"`
 	RewardType string         `json:"rewardType"`
-	Value      hexutil.Big    `json:"value"`
+	Value      hexutil.Big    `json:"value,omitempty"`
 }
 
 type CreateTraceResult struct {

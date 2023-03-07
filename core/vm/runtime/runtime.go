@@ -22,28 +22,26 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 )
 
 // Config is a basic type specifying certain configuration flags for running
 // the EVM.
 type Config struct {
-	ChainConfig *params.ChainConfig
+	ChainConfig *chain.Config
 	Difficulty  *big.Int
-	Origin      common.Address
-	Coinbase    common.Address
+	Origin      libcommon.Address
+	Coinbase    libcommon.Address
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
-	GasPrice    *big.Int
+	GasPrice    *uint256.Int
 	Value       *uint256.Int
 	Debug       bool
 	EVMConfig   vm.Config
@@ -52,20 +50,19 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
-	kv        kv.Has
-	GetHashFn func(n uint64) common.Hash
+	GetHashFn func(n uint64) libcommon.Hash
 }
 
 // sets defaults on the config
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
-		cfg.ChainConfig = &params.ChainConfig{
+		cfg.ChainConfig = &chain.Config{
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        new(big.Int),
 			DAOForkBlock:          new(big.Int),
 			DAOForkSupport:        false,
 			TangerineWhistleBlock: new(big.Int),
-			TangerineWhistleHash:  common.Hash{},
+			TangerineWhistleHash:  libcommon.Hash{},
 			SpuriousDragonBlock:   new(big.Int),
 			ByzantiumBlock:        new(big.Int),
 			ConstantinopleBlock:   new(big.Int),
@@ -76,8 +73,9 @@ func setDefaults(cfg *Config) {
 			LondonBlock:           new(big.Int),
 			ArrowGlacierBlock:     new(big.Int),
 			GrayGlacierBlock:      new(big.Int),
-			ShanghaiBlock:         new(big.Int),
-			CancunBlock:           new(big.Int),
+			ShanghaiTime:          new(big.Int),
+			CancunTime:            new(big.Int),
+			PragueTime:            new(big.Int),
 		}
 	}
 
@@ -91,7 +89,7 @@ func setDefaults(cfg *Config) {
 		cfg.GasLimit = math.MaxUint64
 	}
 	if cfg.GasPrice == nil {
-		cfg.GasPrice = new(big.Int)
+		cfg.GasPrice = new(uint256.Int)
 	}
 	if cfg.Value == nil {
 		cfg.Value = new(uint256.Int)
@@ -100,8 +98,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) common.Hash {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) libcommon.Hash {
+			return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
 }
@@ -111,26 +109,25 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
-func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
 	if cfg.State == nil {
-		db := olddb.NewObjectDatabase(memdb.New())
+		db := olddb.NewObjectDatabase(memdb.New(""))
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
-		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
-		address = common.BytesToAddress([]byte("contract"))
+		address = libcommon.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 	cfg.State.CreateAccount(address, true)
@@ -139,7 +136,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 	// Call the code with the given configuration.
 	ret, _, err := vmenv.Call(
 		sender,
-		common.BytesToAddress([]byte("contract")),
+		libcommon.BytesToAddress([]byte("contract")),
 		input,
 		cfg.GasLimit,
 		cfg.Value,
@@ -150,25 +147,24 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Address, uint64, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
 	if cfg.State == nil {
-		db := olddb.NewObjectDatabase(memdb.New())
+		db := olddb.NewObjectDatabase(memdb.New(""))
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
-		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, nil, vm.ActivePrecompiles(rules), nil)
 	}
 
@@ -187,14 +183,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		statedb.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 

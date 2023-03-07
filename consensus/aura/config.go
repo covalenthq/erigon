@@ -18,20 +18,22 @@
 package aura
 
 import (
+	"errors"
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 )
 
 // Draws an validator nonce modulo number of validators.
-func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
+func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, call consensus.Call) (libcommon.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {
-	//	return common.Address{}, err
+	//	return libcommon.Address{}, err
 	//}
 	return set.getWithCaller(parent, nonce, call)
 }
@@ -39,11 +41,11 @@ func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call 
 // Different ways of specifying validators.
 type ValidatorSetJson struct {
 	// A simple list of authorities.
-	List []common.Address `json:"list"`
+	List []libcommon.Address `json:"list"`
 	// Address of a contract that indicates the list of authorities.
-	SafeContract *common.Address `json:"safeContract"`
-	// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
-	Contract *common.Address `json:"contract"`
+	SafeContract *libcommon.Address `json:"safeContract"`
+	// Address of a contract that indicates the list of authorities and enables reporting of their misbehaviour using transactions.
+	Contract *libcommon.Address `json:"contract"`
 	// A map of starting blocks for each validator set.
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
 }
@@ -57,8 +59,8 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{
-			contractAddress:  *j.SafeContract,
-			validators:       ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition},
+			contractAddress:  *j.Contract,
+			validators:       NewValidatorSafeContract(*j.Contract, posdaoTransition, nil),
 			posdaoTransition: posdaoTransition,
 		}
 	}
@@ -92,19 +94,17 @@ type JsonSpec struct {
 	/// Block reward contract address which overrides the `block_reward` setting. This option allows
 	/// one to add a single block reward contract address and is compatible with the multiple
 	/// address option `block_reward_contract_transitions` below.
-	BlockRewardContractAddress *common.Address `json:"blockRewardContractAddress"`
+	BlockRewardContractAddress *libcommon.Address `json:"blockRewardContractAddress"`
 	// Block reward contract addresses with their associated starting block numbers.
 	//
 	// Setting the block reward contract overrides `block_reward`. If the single block reward
 	// contract address is also present then it is added into the map at the block number stored in
 	// `block_reward_contract_transition` or 0 if that block number is not provided. Therefore both
 	// a single block reward contract transition and a map of reward contract transitions can be
-	// used simulataneously in the same configuration. In such a case the code requires that the
+	// used simultaneously in the same configuration. In such a case the code requires that the
 	// block number of the single transition is strictly less than any of the block numbers in the
 	// map.
-	BlockRewardContractTransitions map[uint]common.Address `json:"blockRewardContractTransitions"`
-	/// Block reward code. This overrides the block reward contract address.
-	BlockRewardContractCode []byte `json:"blockRewardContractCode"`
+	BlockRewardContractTransitions map[uint]libcommon.Address `json:"blockRewardContractTransitions"`
 	// Block at which maximum uncle count should be considered.
 	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
@@ -112,23 +112,31 @@ type JsonSpec struct {
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
 	// The random number contract's address, or a map of contract transitions.
-	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
+	RandomnessContractAddress map[uint64]libcommon.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
 	// associated with each of those contracts.
-	BlockGasLimitContractTransitions map[uint64]common.Address `json:"blockGasLimitContractTransitions"`
+	BlockGasLimitContractTransitions map[uint64]libcommon.Address `json:"blockGasLimitContractTransitions"`
 	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
 	// modifications.
 	PosdaoTransition *uint64 `json:"PosdaoTransition"`
+	// Stores human-readable keys associated with addresses, like DNS information.
+	// This contract is primarily required to store the address of the Certifier contract.
+	Registrar *libcommon.Address `json:"registrar"`
+
+	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	WithdrawalContractAddress *libcommon.Address `json:"withdrawalContractAddress"`
+
+	RewriteBytecode map[uint64]map[libcommon.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
 type Code struct {
 	Code     []byte
-	CodeHash common.Hash
+	CodeHash libcommon.Hash
 }
 
 type BlockRewardContract struct {
 	blockNum uint64
-	address  common.Address // On-chain address.
+	address  libcommon.Address // On-chain address.
 }
 
 type BlockRewardContractList []BlockRewardContract
@@ -148,7 +156,7 @@ func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].block
 func (r BlockRewardList) Len() int           { return len(r) }
 func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
 
-func NewBlockRewardContract(address common.Address) *BlockRewardContract {
+func NewBlockRewardContract(address libcommon.Address) *BlockRewardContract {
 	return &BlockRewardContract{address: address}
 }
 
@@ -181,13 +189,21 @@ type AuthorityRoundParams struct {
 	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
-	RandomnessContractAddress map[uint64]common.Address
+	RandomnessContractAddress map[uint64]libcommon.Address
 	// The addresses of contracts that determine the block gas limit with their associated block
 	// numbers.
-	BlockGasLimitContractTransitions map[uint64]common.Address
+	BlockGasLimitContractTransitions map[uint64]libcommon.Address
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
 	// with POSDAO modifications.
 	PosdaoTransition *uint64
+	// Stores human-readable keys associated with addresses, like DNS information.
+	// This contract is primarily required to store the address of the Certifier contract.
+	Registrar *libcommon.Address
+
+	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	WithdrawalContractAddress *libcommon.Address
+
+	RewriteBytecode map[uint64]map[libcommon.Address][]byte
 }
 
 func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
@@ -197,53 +213,29 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		RandomnessContractAddress:        jsonParams.RandomnessContractAddress,
 		BlockGasLimitContractTransitions: jsonParams.BlockGasLimitContractTransitions,
 		PosdaoTransition:                 jsonParams.PosdaoTransition,
+		Registrar:                        jsonParams.Registrar,
+		WithdrawalContractAddress:        jsonParams.WithdrawalContractAddress,
 	}
 	params.StepDurations = map[uint64]uint64{}
 	if jsonParams.StepDuration != nil {
 		params.StepDurations[0] = *jsonParams.StepDuration
 	}
 
-	//TODO: jsonParams.BlockRewardContractTransitions
-	/*
-			   let mut br_transitions: BTreeMap<_, _> = p
-		           .block_reward_contract_transitions
-		           .unwrap_or_default()
-		           .into_iter()
-		           .map(|(block_num, address)| {
-		               (
-		                   block_num.into(),
-		                   BlockRewardContract::new_from_address(address.into()),
-		               )
-		           })
-		           .collect();
-	*/
-
-	transitionBlockNum := uint64(0)
-	if jsonParams.BlockRewardContractTransition != nil {
-		transitionBlockNum = *jsonParams.BlockRewardContractTransition
-	}
-	/*
-	   if (p.block_reward_contract_code.is_some() || p.block_reward_contract_address.is_some())
-	        && br_transitions
-	            .keys()
-	            .next()
-	            .map_or(false, |&block_num| block_num <= transition_block_num)
-	    {
-	        let s = "blockRewardContractTransition";
-	        panic!("{} should be less than any of the keys in {}s", s, s);
-	    }
-	*/
-	if jsonParams.BlockRewardContractCode != nil {
-		/* TODO: support hard-coded reward contract
-		    br_transitions.insert(
-		       transition_block_num,
-		       BlockRewardContract::new_from_code(Arc::new(code.into())),
-		   );
-		*/
-	} else if jsonParams.BlockRewardContractAddress != nil {
-		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
+	for blockNum, address := range jsonParams.BlockRewardContractTransitions {
+		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: uint64(blockNum), address: address})
 	}
 	sort.Sort(params.BlockRewardContractTransitions)
+	if jsonParams.BlockRewardContractAddress != nil {
+		transitionBlockNum := uint64(0)
+		if jsonParams.BlockRewardContractTransition != nil {
+			transitionBlockNum = *jsonParams.BlockRewardContractTransition
+		}
+		if len(params.BlockRewardContractTransitions) > 0 && transitionBlockNum >= params.BlockRewardContractTransitions[0].blockNum {
+			return params, errors.New("blockRewardContractTransition should be less than any of the keys in BlockRewardContractTransitions")
+		}
+		contract := BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress}
+		params.BlockRewardContractTransitions = append(BlockRewardContractList{contract}, params.BlockRewardContractTransitions...)
+	}
 
 	if jsonParams.ValidateScoreTransition != nil {
 		params.ValidateScoreTransition = *jsonParams.ValidateScoreTransition
@@ -269,6 +261,14 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		}
 	}
 	sort.Sort(params.BlockReward)
+
+	params.RewriteBytecode = make(map[uint64]map[libcommon.Address][]byte, len(jsonParams.RewriteBytecode))
+	for block, overrides := range jsonParams.RewriteBytecode {
+		params.RewriteBytecode[block] = make(map[libcommon.Address][]byte, len(overrides))
+		for address, code := range overrides {
+			params.RewriteBytecode[block][address] = []byte(code)
+		}
+	}
 
 	return params, nil
 }
