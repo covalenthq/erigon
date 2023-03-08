@@ -334,7 +334,7 @@ func execute(ctx *cli.Context) error {
 				env.Timestamp, env.ParentTimestamp))
 		}
 		prestate.Env.Difficulty = calcDifficulty(chainConfig, env.Number, env.Timestamp,
-			env.ParentTimestamp, env.ParentDifficulty, env.ParentUncleHash)
+			env.ParentTimestamp, env.ParentDifficulty, env.UncleHash)
 	}
 
 	// manufacture block from above inputs

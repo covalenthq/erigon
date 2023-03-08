@@ -67,7 +67,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		Ommers           []ommer                                `json:"ommers,omitempty"`
 		BaseFee          *math.HexOrDecimal256                  `json:"currentBaseFee,omitempty"`
 		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
-		UncleHash        *libcommon.Hash                         `json:"uncleHash,omitempty"`
+		UncleHash        *libcommon.Hash                        `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	}
 	var dec stEnv

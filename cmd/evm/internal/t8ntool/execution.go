@@ -136,8 +136,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAllo
 // parent timestamp + difficulty.
 // Note: this method only works for ethash engine.
 func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64,
-	parentDifficulty *big.Int, parentUncleHash libcommon.Hash) *big.Int {
-	uncleHash := parentUncleHash
+	parentDifficulty *big.Int, uncleHash libcommon.Hash) *big.Int {
 	if uncleHash == (libcommon.Hash{}) {
 		uncleHash = types.EmptyUncleHash
 	}
