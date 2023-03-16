@@ -1,0 +1,26 @@
+name: docker-ci-test
+
+on:
+  push:
+    branches:
+    - "covalent"
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GCR
+        uses: docker/login-action@v2
+        with:
+          registry: gcr.io
+          username: _json_key
+          password: ${{ secrets.GCR_JSON_KEY }}
+
+      - uses: actions/checkout@v2
+      # - uses: satackey/action-docker-layer-caching@v0.0.10
+      #   # Ignore the failure of a step and avoid terminating the job.
+      #   continue-on-error: true
+      - name: Build & Publish the Docker image
+        run: |
+          docker build . --file Dockerfile-evm --tag gcr.io/covalent-project/evm-server:latest
+          docker push gcr.io/covalent-project/evm-server:latest;
