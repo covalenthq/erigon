@@ -4,6 +4,9 @@ on:
   push:
     branches:
     - "covalent"
+  pull_request:
+    branches: 
+    - "covalent"
 
 jobs:
   deploy-test:
@@ -22,5 +25,4 @@ jobs:
       #   continue-on-error: true
       - name: Build & Publish the Docker image
         run: |
-          docker build . --file Dockerfile-evm --tag gcr.io/covalent-project/evm-server:latest
-          docker push gcr.io/covalent-project/evm-server:latest;
+          docker buildx create --name builder --use --platform=linux/amd64,linux/arm64  && docker buildx build --file ./Dockerfile-evm --platform=linux/amd64,linux/arm64 . -t gcr.io/covalent-project/evm-server:latest --push
