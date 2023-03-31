@@ -207,7 +207,7 @@ func execute(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
 	} else if replicaInputProvided {
-		Alloc := make(map[libcommon.Address]core.GenesisAccount)
+		Alloc := make(map[libcommon.Address]types.GenesisAccount)
 		Storage := make(map[libcommon.Address]map[libcommon.Hash]libcommon.Hash)
 		Code := make(map[libcommon.Hash][]byte)
 		var ok bool
@@ -223,7 +223,7 @@ func execute(ctx *cli.Context) error {
 		}
 
 		for _, accountRead := range inputReplica.State.AccountRead {
-			Alloc[accountRead.Address] = core.GenesisAccount{
+			Alloc[accountRead.Address] = types.GenesisAccount{
 				Balance: accountRead.Balance.Int,
 				Storage: Storage[accountRead.Address],
 				Nonce:   accountRead.Nonce,
@@ -390,7 +390,7 @@ func execute(ctx *cli.Context) error {
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, getTracer)
 
 	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
+		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", hashError))
 	}
 
 	if err != nil {

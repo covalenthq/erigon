@@ -98,7 +98,7 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided (and it IS provided)
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
 	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
