@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // a big.Int wrapper which marshals/unmarshals into byte arrays
@@ -70,13 +70,13 @@ func (z *BigInt) DecodeRLP(s *rlp.Stream) error {
 }
 
 func decodeBigInt(s *rlp.Stream, val *big.Int) error {
-	i, err := s.BigInt()
+	i, err := s.Uint256Bytes()
 	if err != nil {
 		return fmt.Errorf("%v, %v", err, val)
 	}
 
 	if val != nil {
-		val.Set(i)
+		val.Set(new(big.Int).SetBytes(i))
 	} else {
 		return fmt.Errorf("val is nil, can't set big.Int value")
 	}

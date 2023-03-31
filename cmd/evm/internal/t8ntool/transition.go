@@ -376,7 +376,7 @@ func execute(ctx *cli.Context) error {
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, getTracer)
 
 	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
+		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", hashError))
 	}
 
 	if err != nil {
