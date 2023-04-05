@@ -19,9 +19,8 @@ package vm
 import (
 	"encoding/binary"
 	"errors"
-	"math/big"
-
 	"github.com/minio/sha256-simd"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -172,7 +171,7 @@ var PrecompiledContractsPlanck = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesPlanck           []libcommon.Address
+	PrecompiledAddressesPlanck         []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address
