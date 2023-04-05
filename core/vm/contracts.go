@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"github.com/minio/sha256-simd"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -171,7 +172,7 @@ var PrecompiledContractsPlanck = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesPlanck           []libcommon.Address
+	PrecompiledAddressesPlanck         []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address

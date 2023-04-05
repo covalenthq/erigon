@@ -489,7 +489,7 @@ func init() {
 	}
 
 	PlanckUpgrade[networkname.ChapelChainName] = &Upgrade{
-		UpgradeName:"planck",
+		UpgradeName: "planck",
 		Configs: []*UpgradeConfig{
 			{
 				ContractAddr: SlashContract,
@@ -514,7 +514,7 @@ func init() {
 		},
 	}
 
-PlanckUpgrade[networkname.RialtoChainName] = &Upgrade{
+	PlanckUpgrade[networkname.RialtoChainName] = &Upgrade{
 		UpgradeName: "planck",
 		Configs: []*UpgradeConfig{
 			{
