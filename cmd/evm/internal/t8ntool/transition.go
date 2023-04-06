@@ -703,7 +703,6 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv) *types.Header {
 	var header types.Header
-	header.UncleHash = env.UncleHash
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.GasLimit = env.GasLimit
