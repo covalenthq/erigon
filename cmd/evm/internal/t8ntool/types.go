@@ -30,6 +30,7 @@ type BlockReplica struct {
 	Receipts        []*Receipt
 	Senders         []common.Address
 	State           *StateSpecimen `json:"State"`
+	Withdrawals     []*types2.Withdrawal
 }
 type StateSpecimen struct {
 	AccountRead   []*AccountRead
