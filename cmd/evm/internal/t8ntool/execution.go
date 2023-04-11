@@ -94,7 +94,7 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	stEnv.BaseFee = replica.Header.BaseFee.Int
 	stEnv.UncleHash = replica.Header.UncleHash
 	stEnv.WithdrawalsHash = replica.Header.WithdrawalsHash
-	//StEnv.Withdrawals = make([]*types.Withdrawal, len(replica.State.Withdrawals)) // this needs to be added
+	stEnv.Withdrawals = replica.Withdrawals
 	stEnv.Random = replica.Header.MixDigest.Big()
 	stEnv.MixDigest = replica.Header.MixDigest
 	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided (and it IS provided)
