@@ -30,8 +30,16 @@ type BlockReplica struct {
 	Receipts        []*Receipt
 	Senders         []common.Address
 	State           *StateSpecimen `json:"State"`
-	Withdrawals     []*types2.Withdrawal
+	Withdrawals     []*Withdrawal
 }
+
+type Withdrawal struct {
+	Index     uint64         `json:"index"`          // monotonically increasing identifier issued by consensus layer
+	Validator uint64         `json:"validatorIndex"` // index of validator associated with withdrawal
+	Address   common.Address `json:"address"`        // target address for withdrawn ether
+	Amount    uint64         `json:"amount"`         // value of withdrawal in GWei
+}
+
 type StateSpecimen struct {
 	AccountRead   []*AccountRead
 	StorageRead   []*StorageRead
@@ -361,4 +369,17 @@ func converUncles(ommerHeaders []*types2.Header) []*Header {
 		new_uncles = append(new_uncles, adapted_uncle)
 	}
 	return new_uncles
+}
+
+func (replica *BlockReplica) GetWithdrawals() []*types2.Withdrawal {
+	withdrawals := make([]*types2.Withdrawal, 0, len(replica.Withdrawals))
+	for _, withdrawal := range replica.Withdrawals {
+		withdrawals = append(withdrawals, &types2.Withdrawal{
+			Index:     withdrawal.Index,
+			Validator: withdrawal.Validator,
+			Address:   withdrawal.Address,
+			Amount:    withdrawal.Amount,
+		})
+	}
+	return withdrawals
 }
