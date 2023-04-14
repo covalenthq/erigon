@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,8 +48,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -259,17 +258,8 @@ func execute(ctx *cli.Context) error {
 		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
-	// Construct the chainconfig
-	var chainConfig *chain.Config
-	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
-		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
-		chainConfig = cConf
-		vmConfig.ExtraEips = extraEips
-	}
-	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 
+	chainConfig := params.MainnetChainConfig
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(txStr)
@@ -381,7 +371,7 @@ func execute(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	reader, writer := MakePreState(chainConfig.Rules(block.NumberU64(), block.Time()), tx, prestate.Pre)
 	// serenity engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := serenity.New(&ethash.FakeEthash{})
