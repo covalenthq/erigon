@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,8 +48,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -259,17 +258,9 @@ func execute(ctx *cli.Context) error {
 		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
-	// Construct the chainconfig
-	var chainConfig *chain.Config
-	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
-		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
-		chainConfig = cConf
-		vmConfig.ExtraEips = extraEips
-	}
-	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 
+	chainConfig := params.MainnetChainConfig
+	rules := chainConfig.Rules(inputData.Env.Number, inputData.Env.Timestamp)
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(txStr)
@@ -306,9 +297,8 @@ func execute(ctx *cli.Context) error {
 		}
 	}
 
-	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
 	// Sanity check, to not `panic` in state_transition
-	if eip1559 {
+	if rules.IsLondon {
 		if prestate.Env.BaseFee == nil {
 			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
 		}
@@ -316,11 +306,14 @@ func execute(ctx *cli.Context) error {
 		prestate.Env.Random = nil
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	if rules.IsShanghai && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
+	if replicaInputProvided {
+		isMerged = inputReplica.TotalDifficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+	}
 	env := prestate.Env
 	if isMerged {
 		// post-merge:
@@ -381,7 +374,7 @@ func execute(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	reader, writer := MakePreState(rules, tx, prestate.Pre)
 	// serenity engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := serenity.New(&ethash.FakeEthash{})
