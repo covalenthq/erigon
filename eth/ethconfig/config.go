@@ -225,6 +225,10 @@ type Config struct {
 
 	StateStream bool
 
+	HeadersStageInsertLimit uint64 `toml:",omitempty"`
+
+	IgnoreHeadersAboveHeight *big.Int `toml:",omitempty"`
+
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 

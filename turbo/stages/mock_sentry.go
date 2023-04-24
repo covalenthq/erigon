@@ -420,6 +420,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
+				cfg.HeadersStageInsertLimit,
+				cfg.IgnoreHeadersAboveHeight,
 				mock.BlockSnapshots,
 				blockReader,
 				dirs.Tmp,

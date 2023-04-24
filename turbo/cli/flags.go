@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -45,6 +46,16 @@ var (
 		Name:  "bodies.cache",
 		Usage: "Limit on the cache for block bodies",
 		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
+	}
+
+	HeadersStageInsertLimitFlag = cli.Uint64Flag{
+		Name:  "sync.headers.stepsize",
+		Usage: "Maximum number of headers to insert per run of headers stage. 0 = no limit",
+		Value: 0,
+	}
+	IgnoreHeadersAboveHeightFlag = cli.Uint64Flag{
+		Name:  "sync.headers.stopat",
+		Usage: "Drop received headers above specified height. 0 = no limit",
 	}
 
 	PrivateApiAddr = cli.StringFlag{
@@ -219,6 +230,11 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
+	}
+
+	cfg.HeadersStageInsertLimit = ctx.Uint64(HeadersStageInsertLimitFlag.Name)
+	if ctx.Uint64(IgnoreHeadersAboveHeightFlag.Name) > 0 {
+		cfg.IgnoreHeadersAboveHeight = new(big.Int).SetUint64(ctx.Uint64(IgnoreHeadersAboveHeightFlag.Name))
 	}
 
 	if ctx.String(EtlBufferSizeFlag.Name) != "" {
