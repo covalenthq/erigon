@@ -25,7 +25,7 @@ const (
 )
 
 type EvmServer struct {
-	mux *http.ServeMux
+	mux    *http.ServeMux
 }
 
 type State struct {
