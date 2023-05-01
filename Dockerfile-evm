@@ -14,12 +14,11 @@ RUN apk update && apk add --no-cache bash=5.1.16-r0 libstdc++
 COPY --from=builder /build/build/bin/ /app
 SHELL ["/bin/bash", "-c"]
 RUN chmod +x ./evm
+
+HEALTHCHECK --interval=10s --timeout=5s CMD wget --no-verbose --tries=1 --spider localhost:3002/health
+
 ENTRYPOINT [ "/bin/bash", "-l", "-c" ]
 CMD [ "./evm t8n --server.mode --server.port 3002" ]
-
-#HEALTHCHECK --interval=10s --timeout=5s CMD wget --no-verbose --tries=1 --spider localhost:3002/health
-HEALTHCHECK --interval=10s --timeout=5s --start-period=2s \
-    CMD curl -f --retry 6 --max-time 5 --retry-delay 10 --retry-max-time 60 "http://localhost:3002/health" || bash -c 'kill -s 15 -1 && (sleep 10; kill -s 9 -1)'
 
 # default
 EXPOSE 3002
