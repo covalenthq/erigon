@@ -35,6 +35,7 @@ import (
 	"github.com/ubiq/go-ubiq/common/hexutil"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -50,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -260,8 +262,24 @@ func execute(ctx *cli.Context) error {
 		StatelessExec: true,
 	}
 
-	chainConfig := params.MainnetChainConfig
+	// Construct the chainconfig
+	var chainConfig *chain.Config
+
+	if replicaInputProvided {
+		chainConfig = params.MainnetChainConfig
+	} else {
+		if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
+			return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
+		} else { //nolint:golint
+			chainConfig = cConf
+			vmConfig.ExtraEips = extraEips
+		}
+	}
+
+	// Set the chain id
+	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 	rules := chainConfig.Rules(inputData.Env.Number, inputData.Env.Timestamp)
+
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector && !replicaInputProvided {
 		inFile, err1 := os.Open(txStr)
