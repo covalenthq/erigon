@@ -24,6 +24,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
+	covalentTraceImpl := NewCovalentTraceAPI(base, db, eth, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
 	adminImpl := NewAdminAPI(eth)
@@ -83,6 +84,13 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Namespace: "trace",
 				Public:    true,
 				Service:   TraceAPI(traceImpl),
+				Version:   "1.0",
+			})
+		case "covalent":
+			list = append(list, rpc.API{
+				Namespace: "covalent",
+				Public:    true,
+				Service:   CovalentTraceAPI(covalentTraceImpl),
 				Version:   "1.0",
 			})
 		case "db": /* Deprecated */
