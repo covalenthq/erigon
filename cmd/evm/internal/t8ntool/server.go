@@ -22,6 +22,7 @@ type EvmServer struct {
 }
 
 func (eserv *EvmServer) StartServer(ctx *cli.Context, port int64) error {
+	Version()
 	eserv.mux = http.NewServeMux()
 	eserv.mux.Handle("/process", eserv.recoveryWrapper(eserv.processHttpHandler(ctx)))
 	log.Info("Listening", "port", port)
