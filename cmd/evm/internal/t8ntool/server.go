@@ -11,20 +11,40 @@ import (
 	"os"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli/v2"
 )
 
+const (
+	OK      = "OK"
+	BAD     = "BAD"
+	TIMEOUT = "TIMEOUT"
+)
+
 type EvmServer struct {
 	mux *http.ServeMux
 }
 
+type State struct {
+	status string
+}
+
+func NewState() *State {
+	return &State{status: OK}
+}
+
 func (eserv *EvmServer) StartServer(ctx *cli.Context, port int64) error {
 	Version()
+	httpState := NewState()
 	eserv.mux = http.NewServeMux()
 	eserv.mux.Handle("/process", eserv.recoveryWrapper(eserv.processHttpHandler(ctx)))
+	eserv.mux.Handle("/health", eserv.recoveryWrapper(eserv.healthHttpHandler(ctx, httpState)))
+	eserv.mux.Handle("/sabotage", eserv.recoveryWrapper(eserv.sabotageHttpHandler(ctx, httpState)))
+	eserv.mux.Handle("/recover", eserv.recoveryWrapper(eserv.recoverHttpHandler(ctx, httpState)))
+	eserv.mux.Handle("/timeout", eserv.recoveryWrapper(eserv.timeoutHttpHandler(ctx, httpState)))
 	log.Info("Listening", "port", port)
 	err := http.ListenAndServe(":"+strconv.Itoa(int(port)), eserv.mux)
 	if err != nil {
@@ -159,4 +179,50 @@ func (eserv *EvmServer) respondError(w http.ResponseWriter, err error) {
 	if err != nil {
 		log.Error("error writing data to connection", "error", err)
 	}
+}
+
+func (eserv *EvmServer) healthHttpHandler(ctx *cli.Context, s *State) http.Handler {
+	// Check the health of the server and return a status code accordingly
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		log.Info("Received /health request:", "source=", r.RemoteAddr, "status=", s.status)
+		switch s.status {
+		case OK:
+			io.WriteString(w, "I'm healthy")
+			return
+		case BAD:
+			http.Error(w, "Internal Error", 500)
+			return
+		case TIMEOUT:
+			time.Sleep(30 * time.Second)
+			return
+		default:
+			io.WriteString(w, "UNKNOWN")
+			return
+		}
+	}
+	return http.HandlerFunc(fn)
+}
+
+func (eserv *EvmServer) sabotageHttpHandler(ctx *cli.Context, s *State) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		s.status = BAD
+		io.WriteString(w, "Sabotage ON")
+	}
+	return http.HandlerFunc(fn)
+}
+
+func (eserv *EvmServer) recoverHttpHandler(ctx *cli.Context, s *State) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		s.status = OK
+		io.WriteString(w, "Recovered.")
+	}
+	return http.HandlerFunc(fn)
+}
+
+func (eserv *EvmServer) timeoutHttpHandler(ctx *cli.Context, s *State) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		s.status = TIMEOUT
+		io.WriteString(w, "Configured to timeout.")
+	}
+	return http.HandlerFunc(fn)
 }
