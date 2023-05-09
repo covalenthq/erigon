@@ -45,12 +45,12 @@ func (eserv *EvmServer) StartServer(ctx *cli.Context, port int64) error {
 	eserv.mux.Handle("/sabotage", eserv.recoveryWrapper(eserv.sabotageHttpHandler(ctx, httpState)))
 	eserv.mux.Handle("/recover", eserv.recoveryWrapper(eserv.recoverHttpHandler(ctx, httpState)))
 	eserv.mux.Handle("/timeout", eserv.recoveryWrapper(eserv.timeoutHttpHandler(ctx, httpState)))
-	log.Info("Listening", "port", port)
 	err := http.ListenAndServe(":"+strconv.Itoa(int(port)), eserv.mux)
 	if err != nil {
 		log.Info("error listening and serving on TCP network", "error", err)
 		return err
 	}
+	log.Info("Listening", "port", port)
 
 	return nil
 }
