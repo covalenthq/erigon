@@ -40,11 +40,16 @@ func (eserv *EvmServer) StartServer(ctx *cli.Context, port int64) error {
 	Version()
 	httpState := NewState()
 	eserv.mux = http.NewServeMux()
+
+	// functionality endpoints
 	eserv.mux.Handle("/process", eserv.recoveryWrapper(eserv.processHttpHandler(ctx)))
+
+	// diagnostics related endpoints
 	eserv.mux.Handle("/health", eserv.recoveryWrapper(eserv.healthHttpHandler(ctx, httpState)))
 	eserv.mux.Handle("/sabotage", eserv.recoveryWrapper(eserv.sabotageHttpHandler(ctx, httpState)))
 	eserv.mux.Handle("/recover", eserv.recoveryWrapper(eserv.recoverHttpHandler(ctx, httpState)))
 	eserv.mux.Handle("/timeout", eserv.recoveryWrapper(eserv.timeoutHttpHandler(ctx, httpState)))
+
 	err := http.ListenAndServe(":"+strconv.Itoa(int(port)), eserv.mux)
 	if err != nil {
 		log.Info("error listening and serving on TCP network", "error", err)
@@ -114,12 +119,8 @@ func (eserv *EvmServer) processHttpHandler(ctx *cli.Context) http.Handler {
 			return
 		}
 
-		contents, err = ioutil.ReadFile(tmpFile.Name())
-		if err != nil {
-			eserv.respondError(w, err)
-			return
-		}
-		w.Write(contents)
+		// writes file in chunks rather than after loading it in memory
+		http.ServeFile(w, r, tmpFile.Name())
 	}
 
 	return http.HandlerFunc(fn)
