@@ -528,115 +528,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	return c.verifySeal(chain, header, parents)
 }
 
-// snapshot retrieves the authorization snapshot at a given point in time.
-func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
-	// Search for a snapshot in memory or on disk for checkpoints
-	var snap *Snapshot
-
-	headers := make([]*types.Header, 0, 16)
-
-	//nolint:govet
-	for snap == nil {
-		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
-			snap = s
-
-			break
-		}
-
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
-				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
-
-				snap = s
-
-				break
-			}
-		}
-
-		// If we're at the genesis, snapshot the initial state. Alternatively if we're
-		// at a checkpoint block without a parent (light client CHT), or we have piled
-		// up more headers than allowed to be reorged (chain reinit from a freezer),
-		// consider the checkpoint trusted and snapshot it.
-
-		// TODO fix this
-		// nolint:nestif
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
-
-				// get validators and current span
-				validators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
-				if err != nil {
-					return nil, err
-				}
-
-				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
-				}
-
-				c.logger.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-
-				break
-			}
-		}
-
-		// No snapshot for this header, gather the header and move backward
-		var header *types.Header
-		if len(parents) > 0 {
-			// If we have explicit parents, pick from there (enforced)
-			header = parents[len(parents)-1]
-			if header.Hash() != hash || header.Number.Uint64() != number {
-				return nil, consensus.ErrUnknownAncestor
-			}
-
-			parents = parents[:len(parents)-1]
-		} else {
-			// No explicit parents (or no more left), reach out to the database
-			header = chain.GetHeader(hash, number)
-			if header == nil {
-				return nil, consensus.ErrUnknownAncestor
-			}
-		}
-
-		headers = append(headers, header)
-		number, hash = number-1, header.ParentHash
-	}
-
-	// check if snapshot is nil
-	if snap == nil {
-		return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", number)
-	}
-
-	// Previous snapshot found, apply any pending headers on top of it
-	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
-	}
-
-	snap, err := snap.apply(headers, c.logger)
-	if err != nil {
-		return nil, err
-	}
-
-	c.recents.Add(snap.Hash, snap)
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.DB); err != nil {
-			return nil, err
-		}
-
-		c.logger.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
-	}
-
-	return snap, err
-}
-
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 // VerifyUncles implements consensus.Engine, always returning an error for any
@@ -1140,7 +1031,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		}
 	}
 
-	for c.spanCache.Len() > 128 {
+	for c.spanCache.Len() > 10000 {
 		c.spanCache.DeleteMin()
 	}
 
@@ -1354,4 +1245,145 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 func isSprintStart(number, sprint uint64) bool {
 	return number%sprint == 0
+}
+
+
+// snapshot retrieves the authorization snapshot at a given point in time.
+func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+	snap, err := c.findRecentSnapshot(chain, number, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	// if we can't find a recent snapshot, make one
+	if snap == nil {
+		snap, err = c.createSnapshotAtMostRecentCheckpoint(chain, number)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if snap.Number < number {
+		snap, err = c.evolveSnapshot(chain, snap, number, hash, parents)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, nil
+}
+
+func (c *Bor) evolveSnapshot(chain consensus.ChainHeaderReader, snap *Snapshot, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+	numHeadersToApply := number - snap.Number
+
+	if numHeadersToApply <= 0 {
+		return snap, nil
+	}
+
+	headersToApply := make([]*types.Header, numHeadersToApply)
+
+	header := chain.GetHeader(hash, number)
+	if header == nil {
+		return nil, consensus.ErrUnknownAncestor
+	}
+
+	for i := uint64(0); i < numHeadersToApply; i++ {
+		headersToApply[numHeadersToApply - (i + 1)] = header
+
+		if len(parents) > 0 {
+			header = parents[len(parents)-1]
+			parents = parents[:len(parents)-1]
+		} else {
+			header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		}
+
+		if header == nil {
+			return nil, consensus.ErrUnknownAncestor
+		}
+	}
+
+	snap, err := snap.apply(headersToApply, c.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	if snap.Number%checkpointInterval == 0 {
+		if err = snap.store(c.DB); err != nil {
+			return nil, err
+		}
+
+		c.logger.Info("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+	}
+
+	c.recents.Add(snap.Hash, snap)
+	return snap, nil
+}
+
+func (c *Bor) createSnapshotAtMostRecentCheckpoint(chain consensus.ChainHeaderReader, number uint64) (*Snapshot, error) {
+	checkpointNumber := number - (number%checkpointInterval)
+
+	checkpointHeader := chain.GetHeaderByNumber(checkpointNumber)
+	if checkpointHeader == nil {
+		return nil, consensus.ErrUnknownAncestor
+	}
+
+	checkpointHash := checkpointHeader.Hash()
+
+	// get validators and current span
+	validators, err := c.spanner.GetCurrentValidators(checkpointNumber+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	// new snapshot
+	snap := newSnapshot(c.config, c.signatures, checkpointNumber, checkpointHash, validators)
+	if err := snap.store(c.DB); err != nil {
+		return nil, err
+	}
+
+	c.logger.Info("Stored checkpoint snapshot to disk", "number", checkpointNumber, "hash", checkpointHash)
+	return snap, nil
+}
+
+const prevCheckpointsToTryLoading = 5
+
+func (c *Bor) findRecentSnapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash) (*Snapshot, error) {
+	// If an in-memory snapshot was found, use that
+	if s, ok := c.recents.Get(hash); ok {
+		return s, nil
+	}
+
+	distancePastPredSnapshot := number%checkpointInterval
+
+	// If an on-disk checkpoint snapshot can be found, use that
+	if distancePastPredSnapshot == 0 {
+		if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
+			c.logger.Info("Loaded snapshot from disk", "number", number, "hash", hash, "behindBy", 0)
+			return s, nil
+		}
+	}
+
+	checkpointScanBase := number - (distancePastPredSnapshot + (checkpointInterval * prevCheckpointsToTryLoading))
+	for i := 0; i < prevCheckpointsToTryLoading; i++ {
+		prevCheckpointHeight := checkpointScanBase + (checkpointInterval * uint64(i))
+
+		if prevCheckpointHeight < 0 {
+			continue
+		}
+
+		prevCheckpoint := chain.GetHeaderByNumber(prevCheckpointHeight)
+		if prevCheckpoint == nil {
+			return nil, consensus.ErrUnknownAncestor
+		}
+
+		prevCheckpointHash := prevCheckpoint.Hash()
+
+		if s, err := loadSnapshot(c.config, c.signatures, c.DB, prevCheckpointHash); err == nil {
+			behindBy := number - prevCheckpointHeight
+			c.logger.Info("Loaded snapshot from disk", "number", prevCheckpointHeight, "hash", prevCheckpointHash, "behindBy", behindBy)
+			return s, nil
+		}
+	}
+
+	return nil, nil
 }
