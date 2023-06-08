@@ -39,7 +39,7 @@ const (
 =======
 	VersionMajor       = 2        // Major version component of the current release
 	VersionMinor       = 45       // Minor version component of the current release
-	VersionMicro       = 0        // Patch version component of the current release
+	VersionMicro       = 1        // Patch version component of the current release
 	VersionModifier    = "stable" // Modifier component of the current release
 >>>>>>> ae3983347c (Stable modifications)
 	VersionKeyCreated  = "ErigonVersionCreated"
