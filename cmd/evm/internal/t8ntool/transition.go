@@ -438,7 +438,8 @@ func execute(ctx *cli.Context) error {
 			return err
 		}
 
-		adapted_header, err := adaptHeader(header)
+		adapted_header, err := adaptHeader(block.Header())
+		copyMissingHashesFromReplica(adapted_header, &inputReplica)
 		if err != nil {
 			return err
 		}
