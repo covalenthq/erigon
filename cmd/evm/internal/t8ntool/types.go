@@ -178,6 +178,15 @@ func adaptHeader(header *types2.Header) (*Header, error) {
 	}, nil
 }
 
+func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
+	header.Bloom = inputReplica.Header.Bloom
+	header.ParentHash = inputReplica.Header.ParentHash
+	header.Root = inputReplica.Header.Root
+	header.Extra = inputReplica.Header.Extra
+	header.ReceiptHash = inputReplica.Header.ReceiptHash
+	header.WithdrawalsHash = inputReplica.Header.WithdrawalsHash
+}
+
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var chainId *uint256.Int
