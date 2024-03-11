@@ -1,5 +1,5 @@
 # Build - first phase
-FROM golang:1.19-alpine as builder
+FROM golang:1.22-alpine as builder
 RUN mkdir /build
 WORKDIR /build
 RUN apk update && apk add --no-cache build-base linux-headers git bash ca-certificates libstdc++
@@ -7,10 +7,10 @@ COPY . .
 RUN make evm-dbg
 
 # Runtime -  second phase.
-FROM alpine:3.15.7
+FROM alpine:3.19.1
 RUN mkdir /app
 WORKDIR /app
-RUN apk update && apk add --no-cache bash=5.1.16-r0 libstdc++
+RUN apk update && apk add --no-cache bash libstdc++
 COPY --from=builder --chmod=700 /build/build/bin/ /app
 
 HEALTHCHECK --interval=10s --timeout=5s CMD wget --no-verbose --tries=1 --spider localhost:3002/health
