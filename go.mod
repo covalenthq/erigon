@@ -4,9 +4,9 @@ go 1.20
 
 require (
 	github.com/erigontech/mdbx-go v0.27.22
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230915052220-297d9e7d1304
-	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230908120722-853b40162b46
 	github.com/erigontech/silkworm-go v0.12.0
+	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240221120301-ba08bd4fd916 // indirect
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -32,7 +32,7 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
-	github.com/deckarep/golang-set/v2 v2.3.0
+	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/dop251/goja v0.0.0-20230122112309-96b1610dd4f7
 	github.com/edsrzf/mmap-go v1.1.0
@@ -63,7 +63,6 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.3
-	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/libp2p/go-libp2p v0.31.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
@@ -100,7 +99,6 @@ require (
 	golang.org/x/sys v0.16.0
 	golang.org/x/time v0.5.0
 	google.golang.org/grpc v1.60.1
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -177,7 +175,6 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240221120301-ba08bd4fd916 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect

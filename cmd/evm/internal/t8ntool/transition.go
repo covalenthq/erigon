@@ -385,7 +385,7 @@ func execute(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporal.NewTestDB(nil, datadir.New(""), nil)
+	_, db, _ := temporal.NewTestDB(nil, datadir.New("abc"), nil)
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
