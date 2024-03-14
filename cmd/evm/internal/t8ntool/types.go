@@ -162,22 +162,25 @@ type BlockhashRead struct {
 
 func adaptHeader(header *types2.Header) (*Header, error) {
 	return &Header{
-		ParentHash:  header.ParentHash,
-		UncleHash:   header.UncleHash,
-		Coinbase:    header.Coinbase,
-		Root:        header.Root,
-		TxHash:      header.TxHash,
-		ReceiptHash: header.ReceiptHash,
-		Bloom:       BytesToBloom(header.Bloom.Bytes()),
-		Difficulty:  &BigInt{header.Difficulty},
-		Number:      &BigInt{header.Number},
-		GasLimit:    header.GasLimit,
-		GasUsed:     header.GasUsed,
-		Time:        header.Time,
-		Extra:       header.Extra,
-		MixDigest:   header.MixDigest,
-		Nonce:       EncodeNonce(header.Nonce.Uint64()),
-		BaseFee:     &BigInt{header.BaseFee},
+		ParentHash:       header.ParentHash,
+		UncleHash:        header.UncleHash,
+		Coinbase:         header.Coinbase,
+		Root:             header.Root,
+		TxHash:           header.TxHash,
+		ReceiptHash:      header.ReceiptHash,
+		Bloom:            BytesToBloom(header.Bloom.Bytes()),
+		Difficulty:       &BigInt{header.Difficulty},
+		Number:           &BigInt{header.Number},
+		GasLimit:         header.GasLimit,
+		GasUsed:          header.GasUsed,
+		Time:             header.Time,
+		Extra:            header.Extra,
+		MixDigest:        header.MixDigest,
+		Nonce:            EncodeNonce(header.Nonce.Uint64()),
+		BaseFee:          &BigInt{header.BaseFee},
+		BlobGasUsed:      header.BlobGasUsed,
+		ExcessBlobGas:    header.ExcessBlobGas,
+		ParentBeaconRoot: header.ParentBeaconBlockRoot,
 	}, nil
 }
 
@@ -188,9 +191,9 @@ func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
 	header.Extra = inputReplica.Header.Extra
 	header.ReceiptHash = inputReplica.Header.ReceiptHash
 	header.WithdrawalsHash = inputReplica.Header.WithdrawalsHash
-	header.BlobGasUsed = inputReplica.Header.BlobGasUsed
-	header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
-	header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
+	// header.BlobGasUsed = inputReplica.Header.BlobGasUsed
+	// header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
+	// header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
 }
 
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
