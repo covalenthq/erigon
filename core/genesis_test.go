@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -19,11 +20,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	check := func(network string) {
@@ -45,15 +46,16 @@ func TestGenesisBlockHashes(t *testing.T) {
 }
 
 func TestGenesisBlockRoots(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "")
+	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "", log.Root())
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "", log.Root())
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -62,7 +64,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "", log.Root())
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -73,6 +75,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	tx, err := db.BeginRw(context.Background())
@@ -94,6 +97,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 }
 
 func TestAllocConstructor(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 	assert := assert.New(t)
 

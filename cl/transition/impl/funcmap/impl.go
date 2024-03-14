@@ -5,28 +5,26 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var _ machine.Interface = (*Impl)(nil)
 
 type Impl struct {
-	FnVerifyBlockSignature                    func(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error
-	FnVerifyTransition                        func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
-	FnProcessSlots                            func(s abstract.BeaconState, slot uint64) error
-	FnProcessBlockHeader                      func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
-	FnProcessWithdrawals                      func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error
-	FnProcessExecutionPayload                 func(s abstract.BeaconState, payload *cltypes.Eth1Block) error
-	FnProcessRandao                           func(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
-	FnProcessEth1Data                         func(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
-	FnProcessSyncAggregate                    func(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
-	FnVerifyKzgCommitmentsAgainstTransactions func(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error)
-	FnProcessProposerSlashing                 func(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error
-	FnProcessAttesterSlashing                 func(s abstract.BeaconState, attSlashing *cltypes.AttesterSlashing) error
-	FnProcessAttestations                     func(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error
-	FnProcessDeposit                          func(s abstract.BeaconState, deposit *cltypes.Deposit) error
-	FnProcessVoluntaryExit                    func(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
-	FnProcessBlsToExecutionChange             func(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
+	FnVerifyBlockSignature        func(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error
+	FnVerifyTransition            func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
+	FnProcessSlots                func(s abstract.BeaconState, slot uint64) error
+	FnProcessBlockHeader          func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
+	FnProcessWithdrawals          func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
+	FnProcessExecutionPayload     func(s abstract.BeaconState, payload *cltypes.Eth1Block) error
+	FnProcessRandao               func(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
+	FnProcessEth1Data             func(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
+	FnProcessSyncAggregate        func(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
+	FnProcessProposerSlashing     func(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error
+	FnProcessAttesterSlashing     func(s abstract.BeaconState, attSlashing *cltypes.AttesterSlashing) error
+	FnProcessAttestations         func(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error
+	FnProcessDeposit              func(s abstract.BeaconState, deposit *cltypes.Deposit) error
+	FnProcessVoluntaryExit        func(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
+	FnProcessBlsToExecutionChange func(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
 }
 
 func (i Impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
@@ -41,7 +39,7 @@ func (i Impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBl
 	return i.FnProcessBlockHeader(s, block)
 }
 
-func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error {
+func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	return i.FnProcessWithdrawals(s, withdrawals)
 }
 
@@ -59,10 +57,6 @@ func (i Impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1
 
 func (i Impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error {
 	return i.FnProcessSyncAggregate(s, sync)
-}
-
-func (i Impl) VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
-	return i.FnVerifyKzgCommitmentsAgainstTransactions(transactions, kzgCommitments)
 }
 
 func (i Impl) ProcessProposerSlashing(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error {

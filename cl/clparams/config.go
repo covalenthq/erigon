@@ -19,21 +19,28 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"path"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/params/networkname"
 )
+
+type CaplinConfig struct {
+	Backfilling bool
+	Archive     bool
+}
 
 type NetworkType int
 
 const (
 	MainnetNetwork NetworkType = 1
 	GoerliNetwork  NetworkType = 5
+	HoleskyNetwork NetworkType = 17000
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
@@ -45,6 +52,11 @@ const (
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 10 * time.Second
 	RespTimeout    time.Duration = 15 * time.Second
+)
+
+const (
+	SubDivisionFolderSize = 10_000
+	SlotsPerDump          = 1024
 )
 
 var (
@@ -93,6 +105,14 @@ var (
 		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+	}...)
+	HoleskyBootstrapNodes = append(MainnetBootstrapNodes, []string{
+		"enr:-Ku4QFo-9q73SspYI8cac_4kTX7yF800VXqJW4Lj3HkIkb5CMqFLxciNHePmMt4XdJzHvhrCC5ADI4D_GkAsxGJRLnQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyk",
+		"enr:-Ku4QPG7F72mbKx3gEQEx07wpYYusGDh-ni6SNkLvOS-hhN-BxIggN7tKlmalb0L5JPoAfqD-akTZ-gX06hFeBEz4WoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyk",
+		"enr:-LK4QPxe-mDiSOtEB_Y82ozvxn9aQM07Ui8A-vQHNgYGMMthfsfOabaaTHhhJHFCBQQVRjBww_A5bM1rf8MlkJU_l68Eh2F0dG5ldHOIAADAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQJu6T9pclPObAzEVQ53DpVQqjadmVxdTLL-J3h9NFoCeIN0Y3CCIyiDdWRwgiMo",
+		"enr:-Ly4QGbOw4xNel5EhmDsJJ-QhC9XycWtsetnWoZ0uRy381GHdHsNHJiCwDTOkb3S1Ade0SFQkWJX_pgb3g8Jfh93rvMBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQOxKv9sv3zKF8GDewgFGGHKP5HCZZpPpTrwl9eXKAWGxIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-LS4QG0uV4qvcpJ-HFDJRGBmnlD3TJo7yc4jwK8iP7iKaTlfQ5kZvIDspLMJhk7j9KapuL9yyHaZmwTEZqr10k9XumyCEcmHYXR0bmV0c4gAAAAABgAAAIRldGgykGm32XQEAXAAAAEAAAAAAACCaWSCdjSCaXCErK4j-YlzZWNwMjU2azGhAgfWRBEJlb7gAhXIB5ePmjj2b8io0UpEenq1Kl9cxStJg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
 	}...)
 )
 
@@ -225,6 +245,26 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
+
+	HoleskyNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         155530,
+		BootNodes:                       HoleskyBootstrapNodes,
+	},
 }
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
@@ -248,6 +288,10 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
 		GenesisTime:          1665396300,
 	},
+	HoleskyNetwork: {
+		GenesisValidatorRoot: libcommon.HexToHash("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
+		GenesisTime:          1695902400,
+	},
 }
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
@@ -266,9 +310,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		// "https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		// "https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
@@ -276,6 +320,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
+	},
+	HoleskyNetwork: {
+		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -297,20 +347,21 @@ type BeaconChainConfig struct {
 	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH"`   // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
 
 	// Misc constants.
-	PresetBase                     string `yaml:"PRESET_BASE" spec:"true"`                        // PresetBase represents the underlying spec preset this config is based on.
-	ConfigName                     string `yaml:"CONFIG_NAME" spec:"true"`                        // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
-	TargetCommitteeSize            uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true"`              // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
-	MaxValidatorsPerCommittee      uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true"`       // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
-	MaxCommitteesPerSlot           uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true"`            // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
-	MinPerEpochChurnLimit          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true"`          // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
-	ChurnLimitQuotient             uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true"`               // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
-	ShuffleRoundCount              uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true"`                // ShuffleRoundCount is used for retrieving the permuted index.
-	MinGenesisActiveValidatorCount uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true"` // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
-	MinGenesisTime                 uint64 `yaml:"MIN_GENESIS_TIME" spec:"true"`                   // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
-	TargetAggregatorsPerCommittee  uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true"`   // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
-	HysteresisQuotient             uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true"`                // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
-	HysteresisDownwardMultiplier   uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true"`     // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
-	HysteresisUpwardMultiplier     uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true"`       // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
+	PresetBase                      string `yaml:"PRESET_BASE" spec:"true"`                          // PresetBase represents the underlying spec preset this config is based on.
+	ConfigName                      string `yaml:"CONFIG_NAME" spec:"true"`                          // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
+	TargetCommitteeSize             uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true"`                // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
+	MaxValidatorsPerCommittee       uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true"`         // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
+	MaxCommitteesPerSlot            uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true"`              // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
+	MinPerEpochChurnLimit           uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true"`            // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
+	ChurnLimitQuotient              uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true"`                 // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
+	MaxPerEpochActivationChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true"` // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
+	ShuffleRoundCount               uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true"`                  // ShuffleRoundCount is used for retrieving the permuted index.
+	MinGenesisActiveValidatorCount  uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true"`   // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
+	MinGenesisTime                  uint64 `yaml:"MIN_GENESIS_TIME" spec:"true"`                     // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
+	TargetAggregatorsPerCommittee   uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true"`     // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
+	HysteresisQuotient              uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true"`                  // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
+	HysteresisDownwardMultiplier    uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true"`       // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
+	HysteresisUpwardMultiplier      uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true"`         // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
 
 	// Gwei value constants.
 	MinDepositAmount          uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true"`          // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
@@ -319,9 +370,9 @@ type BeaconChainConfig struct {
 	EffectiveBalanceIncrement uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true"` // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
 
 	// Initial value constants.
-	BLSWithdrawalPrefixByte         byte     `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true"`          // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
-	ETH1AddressWithdrawalPrefixByte byte     `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
-	ZeroHash                        [32]byte // ZeroHash is used to represent a zeroed out 32 byte array.
+	BLSWithdrawalPrefixByte         byte           `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true"`          // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
+	ETH1AddressWithdrawalPrefixByte byte           `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
+	ZeroHash                        libcommon.Hash // ZeroHash is used to represent a zeroed out 32 byte array.
 
 	// Time parameters constants.
 	GenesisDelay                              uint64 `yaml:"GENESIS_DELAY" spec:"true"`                   // GenesisDelay is the minimum number of seconds to delay starting the Ethereum Beacon Chain genesis. Must be at least 1 second.
@@ -379,37 +430,37 @@ type BeaconChainConfig struct {
 	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
-	DomainBeaconProposer              [4]byte `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
-	DomainRandao                      [4]byte `yaml:"DOMAIN_RANDAO" spec:"true"`                         // DomainRandao defines the BLS signature domain for randao verification.
-	DomainBeaconAttester              [4]byte `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true"`                // DomainBeaconAttester defines the BLS signature domain for attestation verification.
-	DomainDeposit                     [4]byte `yaml:"DOMAIN_DEPOSIT" spec:"true"`                        // DomainDeposit defines the BLS signature domain for deposit verification.
-	DomainVoluntaryExit               [4]byte `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
-	DomainSelectionProof              [4]byte `yaml:"DOMAIN_SELECTION_PROOF" spec:"true"`                // DomainSelectionProof defines the BLS signature domain for selection proof.
-	DomainAggregateAndProof           [4]byte `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true"`            // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
-	DomainSyncCommittee               [4]byte `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
-	DomainSyncCommitteeSelectionProof [4]byte `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
-	DomainContributionAndProof        [4]byte `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true"`         // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
-	DomainApplicationMask             [4]byte `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
-	DomainApplicationBuilder          [4]byte // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        [4]byte // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
-	DomainBlobSideCar                 [4]byte `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
+	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true"`                         // DomainRandao defines the BLS signature domain for randao verification.
+	DomainBeaconAttester              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true"`                // DomainBeaconAttester defines the BLS signature domain for attestation verification.
+	DomainDeposit                     libcommon.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true"`                        // DomainDeposit defines the BLS signature domain for deposit verification.
+	DomainVoluntaryExit               libcommon.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
+	DomainSelectionProof              libcommon.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true"`                // DomainSelectionProof defines the BLS signature domain for selection proof.
+	DomainAggregateAndProof           libcommon.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true"`            // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
+	DomainSyncCommittee               libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
+	DomainSyncCommitteeSelectionProof libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
+	DomainContributionAndProof        libcommon.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true"`         // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
+	DomainApplicationMask             libcommon.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
+	DomainApplicationBuilder          libcommon.Bytes4 // DomainApplicationBuilder defines the BLS signature domain for application builder.
+	DomainBLSToExecutionChange        libcommon.Bytes4 // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBlobSideCar                 libcommon.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
 
 	// Prysm constants.
-	GweiPerEth                     uint64        // GweiPerEth is the amount of gwei corresponding to 1 eth.
-	BLSSecretKeyLength             int           // BLSSecretKeyLength defines the expected length of BLS secret keys in bytes.
-	BLSPubkeyLength                int           // BLSPubkeyLength defines the expected length of BLS public keys in bytes.
-	DefaultBufferSize              int           // DefaultBufferSize for channels across the Prysm repository.
-	ValidatorPrivkeyFileName       string        // ValidatorPrivKeyFileName specifies the string name of a validator private key file.
-	WithdrawalPrivkeyFileName      string        // WithdrawalPrivKeyFileName specifies the string name of a withdrawal private key file.
-	RPCSyncCheck                   time.Duration // Number of seconds to query the sync service, to find out if the node is synced or not.
-	EmptySignature                 [96]byte      // EmptySignature is used to represent a zeroed out BLS Signature.
-	DefaultPageSize                int           // DefaultPageSize defines the default page size for RPC server request.
-	MaxPeersToSync                 int           // MaxPeersToSync describes the limit for number of peers in round robin sync.
-	SlotsPerArchivedPoint          uint64        // SlotsPerArchivedPoint defines the number of slots per one archived point.
-	GenesisCountdownInterval       time.Duration // How often to log the countdown until the genesis time is reached.
-	BeaconStateFieldCount          int           // BeaconStateFieldCount defines how many fields are in beacon state.
-	BeaconStateAltairFieldCount    int           // BeaconStateAltairFieldCount defines how many fields are in beacon state hard fork 1.
-	BeaconStateBellatrixFieldCount int           // BeaconStateBellatrixFieldCount defines how many fields are in beacon state post upgrade to the Bellatrix.
+	GweiPerEth                     uint64            // GweiPerEth is the amount of gwei corresponding to 1 eth.
+	BLSSecretKeyLength             int               // BLSSecretKeyLength defines the expected length of BLS secret keys in bytes.
+	BLSPubkeyLength                int               // BLSPubkeyLength defines the expected length of BLS public keys in bytes.
+	DefaultBufferSize              int               // DefaultBufferSize for channels across the Prysm repository.
+	ValidatorPrivkeyFileName       string            // ValidatorPrivKeyFileName specifies the string name of a validator private key file.
+	WithdrawalPrivkeyFileName      string            // WithdrawalPrivKeyFileName specifies the string name of a withdrawal private key file.
+	RPCSyncCheck                   time.Duration     // Number of seconds to query the sync service, to find out if the node is synced or not.
+	EmptySignature                 libcommon.Bytes96 // EmptySignature is used to represent a zeroed out BLS Signature.
+	DefaultPageSize                int               // DefaultPageSize defines the default page size for RPC server request.
+	MaxPeersToSync                 int               // MaxPeersToSync describes the limit for number of peers in round robin sync.
+	SlotsPerArchivedPoint          uint64            // SlotsPerArchivedPoint defines the number of slots per one archived point.
+	GenesisCountdownInterval       time.Duration     // How often to log the countdown until the genesis time is reached.
+	BeaconStateFieldCount          int               // BeaconStateFieldCount defines how many fields are in beacon state.
+	BeaconStateAltairFieldCount    int               // BeaconStateAltairFieldCount defines how many fields are in beacon state hard fork 1.
+	BeaconStateBellatrixFieldCount int               // BeaconStateBellatrixFieldCount defines how many fields are in beacon state post upgrade to the Bellatrix.
 
 	// Slasher constants.
 	WeakSubjectivityPeriod    uint64 // WeakSubjectivityPeriod defines the time period expressed in number of epochs were proof of stake network should validate block headers and attestations for slashable events.
@@ -429,8 +480,8 @@ type BeaconChainConfig struct {
 	DenebForkVersion     uint32 `yaml:"DENEB_FORK_VERSION" spec:"true"`     // DenebForkVersion is used to represent the fork version for Deneb.
 	DenebForkEpoch       uint64 `yaml:"DENEB_FORK_EPOCH" spec:"true"`       // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
 
-	ForkVersionSchedule map[[VersionLength]byte]uint64 // Schedule of fork epochs by version.
-	ForkVersionNames    map[[VersionLength]byte]string // Human-readable names of fork versions.
+	ForkVersionSchedule map[libcommon.Bytes4]uint64 // Schedule of fork epochs by version.
+	ForkVersionNames    map[libcommon.Bytes4]string // Human-readable names of fork versions.
 
 	// Weak subjectivity values.
 	SafetyDecay uint64 // SafetyDecay is defined as the loss in the 1/3 consensus safety margin of the casper FFG mechanism.
@@ -482,6 +533,28 @@ type BeaconChainConfig struct {
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
+
+	MaxBlobGasPerBlock           uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
+	MaxBlobsPerBlock             uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	MaxRequestLightClientUpdates uint64 // MaxRequestLightClientUpdates defines the maximum number of light client updates per request.
+}
+
+func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
+	return slot - (slot % b.SlotsPerEpoch)
+}
+
+func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
+	slotsPerSyncCommitteePeriod := b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod
+	return slot - (slot % slotsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
+	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
+	return slot - (slot % p)
 }
 
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
@@ -507,8 +580,8 @@ func toBytes4(in []byte) (ret [4]byte) {
 	return
 }
 
-func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
-	fvs := map[[VersionLength]byte]uint64{}
+func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
+	fvs := map[libcommon.Bytes4]uint64{}
 	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
 	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
@@ -517,8 +590,8 @@ func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	return fvs
 }
 
-func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
-	fvn := map[[VersionLength]byte]string{}
+func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
+	fvn := map[libcommon.Bytes4]string{}
 	fvn[utils.Uint32ToBytes4(b.GenesisForkVersion)] = "phase0"
 	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
 	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
@@ -544,18 +617,19 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	GenesisDelay:             604800, // 1 week.
 
 	// Misc constant.
-	TargetCommitteeSize:            128,
-	MaxValidatorsPerCommittee:      2048,
-	MaxCommitteesPerSlot:           64,
-	MinPerEpochChurnLimit:          4,
-	ChurnLimitQuotient:             1 << 16,
-	ShuffleRoundCount:              90,
-	MinGenesisActiveValidatorCount: 16384,
-	MinGenesisTime:                 1606824000, // Dec 1, 2020, 12pm UTC.
-	TargetAggregatorsPerCommittee:  16,
-	HysteresisQuotient:             4,
-	HysteresisDownwardMultiplier:   1,
-	HysteresisUpwardMultiplier:     5,
+	TargetCommitteeSize:             128,
+	MaxValidatorsPerCommittee:       2048,
+	MaxCommitteesPerSlot:            64,
+	MinPerEpochChurnLimit:           4,
+	ChurnLimitQuotient:              1 << 16,
+	MaxPerEpochActivationChurnLimit: 8,
+	ShuffleRoundCount:               90,
+	MinGenesisActiveValidatorCount:  16384,
+	MinGenesisTime:                  1606824000, // Dec 1, 2020, 12pm UTC.
+	TargetAggregatorsPerCommittee:   16,
+	HysteresisQuotient:              4,
+	HysteresisDownwardMultiplier:    1,
+	HysteresisUpwardMultiplier:      5,
 
 	// Gwei value constants.
 	MinDepositAmount:          1 * 1e9,
@@ -679,7 +753,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkVersion:   0x03000000,
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
-	DenebForkEpoch:       math.MaxUint64,
+	DenebForkEpoch:       269568,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -726,6 +800,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Mevboost circuit breaker
 	MaxBuilderConsecutiveMissedSlots: 3,
 	MaxBuilderEpochMissedSlots:       8,
+
+	MaxBlobGasPerBlock:           786432,
+	MaxBlobsPerBlock:             6,
+	MaxRequestLightClientUpdates: 128,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -774,6 +852,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x90000071
 	cfg.CapellaForkEpoch = 56832
 	cfg.CapellaForkVersion = 0x90000072
+	cfg.DenebForkEpoch = 132608
+	cfg.DenebForkVersion = 0x90000073
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -795,11 +875,51 @@ func goerliConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02001020
 	cfg.CapellaForkEpoch = 162304
 	cfg.CapellaForkVersion = 0x03001020
-	cfg.DenebForkVersion = 0x40001020
+	cfg.DenebForkEpoch = 231680
+	cfg.DenebForkVersion = 0x04001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
 	return cfg
+}
+
+func holeskyConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "holesky"
+	cfg.MinGenesisActiveValidatorCount = 16384
+	cfg.MinGenesisTime = 1695902100
+	cfg.GenesisForkVersion = 0x01017000
+	cfg.GenesisDelay = 300
+	cfg.SecondsPerSlot = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.DepositChainID = uint64(HoleskyNetwork)
+	cfg.DepositNetworkID = uint64(HoleskyNetwork)
+
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x02017000
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x03017000
+	cfg.CapellaForkEpoch = 256
+	cfg.CapellaForkVersion = 0x04017000
+	cfg.DenebForkEpoch = 29696
+	cfg.DenebForkVersion = 0x05017000
+	cfg.TerminalTotalDifficulty = "0"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+	cfg.DepositContractAddress = "0x4242424242424242424242424242424242424242"
+	cfg.BaseRewardFactor = 64
+	cfg.SlotsPerEpoch = 32
+	cfg.EpochsPerSyncCommitteePeriod = 256
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 28000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 1 << 16
+	cfg.ProposerScoreBoost = 40
+
+	cfg.InitializeForkSchedule()
+	return cfg
+
 }
 
 func gnosisConfig() BeaconChainConfig {
@@ -826,7 +946,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = math.MaxUint64
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
@@ -851,13 +972,15 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x0100006f
 	cfg.BellatrixForkEpoch = 180
 	cfg.BellatrixForkVersion = 0x0200006f
+	cfg.CapellaForkEpoch = 244224
+	cfg.CapellaForkVersion = 0x0300006f
+	cfg.DenebForkEpoch = 516608
+	cfg.DenebForkVersion = 0x0400006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = math.MaxUint64
-	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -901,6 +1024,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	GoerliNetwork:  goerliConfig(),
+	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
 }
@@ -923,6 +1047,38 @@ func (b *BeaconChainConfig) PreviousEpochAttestationsLength() uint64 {
 // BeaconChainConfig.
 func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
 	return b.SlotsPerEpoch * b.MaxAttestations
+}
+
+func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
+	switch v {
+	case Phase0Version:
+		return b.GenesisForkVersion
+	case AltairVersion:
+		return b.AltairForkVersion
+	case BellatrixVersion:
+		return b.BellatrixForkVersion
+	case CapellaVersion:
+		return b.CapellaForkVersion
+	case DenebVersion:
+		return b.DenebForkVersion
+	}
+	panic("invalid version")
+}
+
+func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version:
+		return 0
+	case AltairVersion:
+		return b.AltairForkEpoch
+	case BellatrixVersion:
+		return b.BellatrixForkEpoch
+	case CapellaVersion:
+		return b.CapellaForkEpoch
+	case DenebVersion:
+		return b.DenebForkEpoch
+	}
+	panic("invalid version")
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
@@ -949,10 +1105,14 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	case networkname.ChiadoChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
 		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
+	case networkname.HoleskyChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
+		return genesisCfg, networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
 		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
 }
+
 func GetCheckpointSyncEndpoint(net NetworkType) string {
 	checkpoints, ok := CheckpointSyncEndpoints[net]
 	if !ok {
@@ -977,6 +1137,7 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 5 ||
+		id == 17000 ||
 		id == 11155111 ||
 		id == 100 // ||
 	//id == 10200
@@ -986,4 +1147,13 @@ func EmbeddedSupported(id uint64) bool {
 // (sufficient number of light-client peers) as to be enabled by default
 func EmbeddedEnabledByDefault(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
+}
+
+func SupportBackfilling(networkId uint64) bool {
+	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
+}
+
+func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

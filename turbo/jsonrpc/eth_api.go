@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -24,7 +26,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -318,32 +319,36 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend      rpchelper.ApiBackend
-	txPool          txpool.TxpoolClient
-	mining          txpool.MiningClient
-	gasCache        *GasPriceCache
-	db              kv.RoDB
-	GasCap          uint64
-	ReturnDataLimit int
-	logger          log.Logger
+	ethBackend                  rpchelper.ApiBackend
+	txPool                      txpool.TxpoolClient
+	mining                      txpool.MiningClient
+	gasCache                    *GasPriceCache
+	db                          kv.RoDB
+	GasCap                      uint64
+	ReturnDataLimit             int
+	AllowUnprotectedTxs         bool
+	MaxGetProofRewindBlockCount int
+	logger                      log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
-		BaseAPI:         base,
-		db:              db,
-		ethBackend:      eth,
-		txPool:          txPool,
-		mining:          mining,
-		gasCache:        NewGasPriceCache(),
-		GasCap:          gascap,
-		ReturnDataLimit: returnDataLimit,
-		logger:          logger,
+		BaseAPI:                     base,
+		db:                          db,
+		ethBackend:                  eth,
+		txPool:                      txPool,
+		mining:                      mining,
+		gasCache:                    NewGasPriceCache(),
+		GasCap:                      gascap,
+		AllowUnprotectedTxs:         allowUnprotectedTxs,
+		ReturnDataLimit:             returnDataLimit,
+		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
+		logger:                      logger,
 	}
 }
 
@@ -372,9 +377,9 @@ type RPCTransaction struct {
 	S                   *hexutil.Big       `json:"s"`
 }
 
-// newRPCTransaction returns a transaction that will serialize to the RPC
+// NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func NewRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
@@ -485,7 +490,7 @@ func newRPCPendingTransaction(tx types.Transaction, current *types.Header, confi
 	if current != nil {
 		baseFee = misc.CalcBaseFee(config, current)
 	}
-	return newRPCTransaction(tx, common.Hash{}, 0, 0, baseFee)
+	return NewRPCTransaction(tx, common.Hash{}, 0, 0, baseFee)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

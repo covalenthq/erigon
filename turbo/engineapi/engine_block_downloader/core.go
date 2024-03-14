@@ -4,16 +4,16 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 // download is the process that reverse download a specific block hash.
-func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, requestId int, block *types.Block) {
+func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
-	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0, downloaderTip) {
+	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0) {
 		e.logger.Warn("[EngineBlockDownloader] could not begin header download")
 		// could it be scheduled? if not nevermind.
 		e.status.Store(headerdownload.Idle)
@@ -32,13 +32,13 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 
 	tx, err := e.db.BeginRo(e.ctx)
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could not begin tx: %s", err)
+		e.logger.Warn("[EngineBlockDownloader] Could not begin tx", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
 	defer tx.Rollback()
 
-	tmpDb, err := mdbx.NewTemporaryMdbx(e.tmpdir)
+	tmpDb, err := mdbx.NewTemporaryMdbx(e.ctx, e.tmpdir)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -53,7 +53,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	}
 	defer tmpTx.Rollback()
 
-	memoryMutation := memdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
+	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
 	defer memoryMutation.Rollback()
 
 	startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
@@ -83,7 +83,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	// Can fail, not an issue in this case.
 	e.chainRW.InsertBlockAndWait(block)
 	// Lastly attempt verification
-	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)
@@ -107,14 +107,14 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
 // blockTip is optional and should be the block tip of the download request. which will be inserted at the end of the procedure if specified.
-func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, blockTip *types.Block) bool {
+func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, blockTip *types.Block) bool {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if e.status.Load() == headerdownload.Syncing {
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)
-	go e.download(hashToDownload, downloaderTip, requestId, blockTip)
+	go e.download(hashToDownload, requestId, blockTip)
 	return true
 }
 

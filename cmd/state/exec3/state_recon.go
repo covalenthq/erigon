@@ -17,7 +17,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -150,7 +149,7 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
-			codeHash, err := common.HashData(val)
+			codeHash, err := libcommon.HashData(val)
 			if err != nil {
 				return err
 			}
@@ -298,7 +297,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "", logger)
 		if err != nil {
 			return err
 		}

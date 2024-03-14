@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
@@ -27,6 +27,12 @@ func GetEpochAtSlot(config *clparams.BeaconChainConfig, slot uint64) uint64 {
 // Epoch returns current epoch.
 func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
+}
+
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, slot, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
+	modulo := utils.Max64(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
+	hashSlotSignatue := utils.Sha256(slotSignature[:])
+	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
 
 // GetTotalBalance return the sum of all balances within the given validator set.
@@ -83,12 +89,9 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 }
 
 // IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(b abstract.BeaconState, epoch, index uint64, flagIdx int) bool {
-	validator, err := b.ValidatorForValidatorIndex(int(index))
-	if err != nil {
-		return false
-	}
-	return validator.Active(epoch) && cltypes.ParticipationFlags(b.EpochParticipation(false).Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
+func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList, epoch, index uint64, flagIdx int) bool {
+	validator := validatorSet.Get(int(index))
+	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
@@ -192,7 +195,7 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 }
 
 // ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
+func ExpectedWithdrawals(b abstract.BeaconState) []*cltypes.Withdrawal {
 	// Get the current epoch, the next withdrawal index, and the next withdrawal validator index
 	currentEpoch := Epoch(b)
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
@@ -202,7 +205,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 	maxValidators := uint64(b.ValidatorLength())
 	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
 	bound := utils.Min64(maxValidators, maxValidatorsPerWithdrawalsSweep)
-	withdrawals := make([]*types.Withdrawal, 0, bound)
+	withdrawals := make([]*cltypes.Withdrawal, 0, bound)
 
 	// Loop through the validators to calculate expected withdrawals
 	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
@@ -214,7 +217,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 		// Check if the validator is fully withdrawable
 		if isFullyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance, currentEpoch) {
 			// Add a new withdrawal with the validator's withdrawal credentials and balance
-			newWithdrawal := &types.Withdrawal{
+			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   libcommon.BytesToAddress(wd[12:]),
@@ -224,7 +227,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 			nextWithdrawalIndex++
 		} else if isPartiallyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance) { // Check if the validator is partially withdrawable
 			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
-			newWithdrawal := &types.Withdrawal{
+			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   libcommon.BytesToAddress(wd[12:]),

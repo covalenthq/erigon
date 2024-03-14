@@ -12,7 +12,7 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
 type ExecutionEngine interface {
-	NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (bool, error)
+	NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (bool, error)
 	ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error
 	SupportInsertion() bool
 	InsertBlocks([]*types.Block) error
@@ -22,4 +22,6 @@ type ExecutionEngine interface {
 	// Range methods
 	GetBodiesByRange(start, count uint64) ([]*types.RawBody, error)
 	GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error)
+	// Snapshots
+	FrozenBlocks() uint64
 }

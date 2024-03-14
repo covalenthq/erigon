@@ -12,19 +12,17 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -58,6 +56,7 @@ type TraceCallParam struct {
 	AccessList           *types2.AccessList `json:"accessList"`
 	txHash               *libcommon.Hash
 	traceTypes           []string
+	isBorStateSyncTxn    bool
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -270,7 +269,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 			vmTrace = ot.r.VmTrace
 		}
 		if create {
-			vmTrace.Code = common.CopyBytes(input)
+			vmTrace.Code = libcommon.CopyBytes(input)
 			if ot.lastVmOp != nil {
 				ot.lastVmOp.Cost += int(gas)
 			}
@@ -319,7 +318,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 		action := CreateTraceAction{}
 		action.From = from
 		action.Gas.ToInt().SetUint64(gas)
-		action.Init = common.CopyBytes(input)
+		action.Init = libcommon.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else if typ == vm.SELFDESTRUCT {
@@ -345,7 +344,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 		action.From = from
 		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
-		action.Input = common.CopyBytes(input)
+		action.Input = libcommon.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	}
@@ -353,7 +352,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
@@ -382,7 +381,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		return
 	}
 	if !deep {
-		ot.r.Output = common.CopyBytes(output)
+		ot.r.Output = libcommon.CopyBytes(output)
 	}
 	ignoreError := false
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -396,11 +395,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = libcommon.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = libcommon.CopyBytes(output)
 			}
 		} else {
 			topTrace.Result = nil
@@ -410,9 +409,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		if len(output) > 0 {
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = libcommon.CopyBytes(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = libcommon.CopyBytes(output)
 			}
 		}
 		switch topTrace.Type {
@@ -726,24 +725,28 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
+	var isBorStateSyncTxn bool
 	blockNum, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
-	}
-	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txHash)
+		if chainConfig.Bor == nil {
+			return nil, nil
+		}
+
+		// otherwise this may be a bor state sync transaction - check
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
+		if !ok {
 			return nil, nil
 		}
-		blockNum = *blockNumPtr
+
+		isBorStateSyncTxn = true
 	}
+
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -751,17 +754,23 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	if block == nil {
 		return nil, nil
 	}
-	var txnIndex uint64
-	for i, transaction := range block.Transactions() {
-		if transaction.Hash() == txHash {
-			txnIndex = uint64(i)
+
+	var txnIndex int
+	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
+		txn := block.Transactions()[idx]
+		if txn.Hash() == txHash {
+			txnIndex = idx
 			break
 		}
 	}
 
+	if isBorStateSyncTxn {
+		txnIndex = block.Transactions().Len()
+	}
+
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), *gasBailOut, signer, chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, txnIndex, *gasBailOut, signer, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -783,7 +792,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 
 	for txno, trace := range traces {
 		// We're only looking for a specific transaction
-		if txno == int(txnIndex) {
+		if txno == txnIndex {
 			result.Output = trace.Output
 			if traceTypeTrace {
 				result.Trace = trace.Trace
@@ -798,6 +807,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 			return trace, nil
 		}
 	}
+
 	return result, nil
 }
 
@@ -864,9 +874,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		if traceTypeVmTrace {
 			tr.VmTrace = trace.VmTrace
 		}
+		tr.TransactionHash = trace.TransactionHash
 		result[i] = tr
-		txhash := block.Transactions()[i].Hash()
-		tr.TransactionHash = &txhash
 	}
 
 	return result, nil
@@ -985,7 +994,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	traceResult.Output = common.CopyBytes(execResult.ReturnData)
+	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[libcommon.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1140,7 +1149,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	// Make sure the context is cancelled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
-	results := []*TraceCallResult{}
+	results := make([]*TraceCallResult, 0, len(msgs))
 
 	useParent := false
 	if header == nil {
@@ -1152,7 +1161,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
-		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		args := callParams[txIndex]
 		for _, traceType := range args.traceTypes {
@@ -1167,6 +1176,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				return nil, nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 			}
 		}
+
+		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
 		vmConfig := vm.Config{}
 		if (traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded)) || traceTypeVmTrace {
 			var ot OeTracer
@@ -1183,54 +1194,87 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			vmConfig.Tracer = &ot
 		}
 
-		// Get a new instance of the EVM.
 		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
-		txCtx := core.NewEVMTxContext(msg)
-
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
 		}
-		ibs.Reset()
-		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		var execResult *core.ExecutionResult
-		// Clone the state cache before applying the changes, clone is discarded
+		// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
 		var cloneReader state.StateReader
+		var sd *StateDiff
 		if traceTypeStateDiff {
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
+
+			sdMap := make(map[libcommon.Address]*StateDiffAccount)
+			traceResult.StateDiff = sdMap
+			sd = &StateDiff{sdMap: sdMap}
 		}
-		if args.txHash != nil {
-			ibs.SetTxContext(*args.txHash, header.Hash(), txIndex)
+
+		var finalizeTxStateWriter state.StateWriter
+		if sd != nil {
+			finalizeTxStateWriter = sd
 		} else {
-			ibs.SetTxContext(libcommon.Hash{}, header.Hash(), txIndex)
+			finalizeTxStateWriter = noop
 		}
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
+
+		ibs.Reset()
+
+		var txFinalized bool
+		var execResult *core.ExecutionResult
+		if args.isBorStateSyncTxn {
+			txFinalized = true
+			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
+				ctx,
+				dbtx,
+				&vmConfig,
+				chainConfig,
+				api._blockReader,
+				ibs,
+				finalizeTxStateWriter,
+				blockCtx,
+				header.Hash(),
+				header.Number.Uint64(),
+				header.Time,
+			)
+		} else {
+			if args.txHash != nil {
+				ibs.SetTxContext(*args.txHash, header.Hash(), txIndex)
+			} else {
+				ibs.SetTxContext(libcommon.Hash{}, header.Hash(), txIndex)
+			}
+
+			txCtx := core.NewEVMTxContext(msg)
+			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+
+			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
-		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+
+		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+		traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
-			sdMap := make(map[libcommon.Address]*StateDiffAccount)
-			traceResult.StateDiff = sdMap
-			sd := &StateDiff{sdMap: sdMap}
-			if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
-				return nil, nil, err
+			if !txFinalized {
+				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+					return nil, nil, err
+				}
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
 		} else {
-			if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-				return nil, nil, err
+			if !txFinalized {
+				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+					return nil, nil, err
+				}
 			}
-			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1244,6 +1288,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			break
 		}
 	}
+
 	return results, ibs, nil
 }
 

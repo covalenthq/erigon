@@ -5,24 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -324,14 +325,14 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
 			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
 			TransactionIndex: uint(txIndex),
 			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
 		}
-		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
 
@@ -434,8 +435,6 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 }
 
 func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
-	var wg sync.WaitGroup
-
 	// Estimate the common case of user address having at most 1 interaction/block and
 	// trace N := remaining page matches as number of blocks to trace concurrently.
 	// TODO: this is not optimimal for big contract addresses; implement some better heuristics.
@@ -444,7 +443,11 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	totalBlocksTraced := 0
 	hasMore := true
 
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(1024) // we don't want limit much here, but protecting from infinity attack
 	for i := 0; i < int(estBlocksToTrace); i++ {
+		i := i // we will pass it to goroutine
+
 		var nextBlock uint64
 		var err error
 		nextBlock, hasMore, err = callFromToProvider()
@@ -456,16 +459,24 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 			break
 		}
 
-		wg.Add(1)
 		totalBlocksTraced++
-		go api.searchTraceBlock(ctx, &wg, addr, chainConfig, i, nextBlock, results)
+
+		eg.Go(func() error {
+			// don't return error from searchTraceBlock - to avoid 1 block fail impact to other blocks
+			// if return error - `errgroup` will interrupt all other goroutines
+			// but passing `ctx` - then user still can cancel request
+			api.searchTraceBlock(ctx, addr, chainConfig, i, nextBlock, results)
+			return nil
+		})
 	}
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		return nil, false, err
+	}
 
 	return results[:totalBlocksTraced], hasMore, nil
 }
 
-func (api *OtterscanAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
@@ -475,7 +486,7 @@ func (api *OtterscanAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, 
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/ledgerwatch/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["totalDifficulty"] = (*hexutil.Big)(td)
+	response["totalDifficulty"] = (*hexutil2.Big)(td)
 	response["transactionCount"] = b.Transactions().Len()
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -497,7 +508,7 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
+func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return internalIssuance{}, nil
@@ -511,19 +522,14 @@ func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chai
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
+	ret.BlockReward = hexutil2.EncodeBig(minerReward.ToBig())
+	ret.Issuance = hexutil2.EncodeBig(issuance.ToBig())
 	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
+	ret.UncleReward = hexutil2.EncodeBig(issuance.ToBig())
 	return ret, nil
 }
 
-func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config) (uint64, error) {
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
-	if err != nil {
-		return 0, fmt.Errorf("getReceipts error: %v", err)
-	}
-
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint64, error) {
 	fees := uint64(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
@@ -575,7 +581,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, true)
+	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, true)
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +595,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
+		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
 		marshalledRcpt["logs"] = nil
 		marshalledRcpt["logsBloom"] = nil
 		result = append(result, marshalledRcpt)

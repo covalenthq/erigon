@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -38,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -138,7 +139,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
@@ -421,7 +422,7 @@ func iterateOverCode(chaindata string) error {
 		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[libcommon.BytesToHash(k)] = common.CopyBytes(v)
+				hashes[libcommon.BytesToHash(k)] = libcommon.CopyBytes(v)
 			}
 			return nil
 		}); err != nil {
@@ -538,7 +539,7 @@ func extractBodies(datadir string) error {
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"), log.New())
+	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 
 	/* method Iterate was removed, need re-implement

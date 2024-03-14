@@ -1,17 +1,24 @@
 package consensus_tests
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +70,7 @@ func (f *ForkChoiceStep) GetValid() bool {
 	if f.Valid == nil {
 		return true
 	}
-	return false
+	return *f.Valid
 }
 func (f *ForkChoiceStep) GetAttestation() string {
 	if f.Attestation == nil {
@@ -150,8 +157,10 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, nil, false)
+	emitters := beaconevents.NewEmitters()
+	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
 	require.NoError(t, err)
+	forkStore.SetSynced(true)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
@@ -167,7 +176,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			data := &cltypes.AttesterSlashing{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttesterSlashing(data)
+			err = forkStore.OnAttesterSlashing(data, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
@@ -189,7 +198,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			att := &solid.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttestation(att, false)
+			err = forkStore.OnAttestation(att, false, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

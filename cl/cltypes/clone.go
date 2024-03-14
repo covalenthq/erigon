@@ -103,3 +103,19 @@ func (*KZGCommitment) Clone() clonable.Clonable {
 func (*Eth1Header) Clone() clonable.Clonable {
 	return &Eth1Header{}
 }
+
+func (*Withdrawal) Clone() clonable.Clonable {
+	return &Withdrawal{}
+}
+
+func (s *SignedContributionAndProof) Clone() clonable.Clonable {
+	return &SignedContributionAndProof{}
+}
+
+func (*Root) Clone() clonable.Clonable {
+	return &Root{}
+}
+
+func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
+	return &LightClientUpdatesByRangeRequest{}
+}

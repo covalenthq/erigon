@@ -68,8 +68,32 @@ func (b *BeaconState) Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data] {
 	return b.eth1DataVotes
 }
 
+func (b *BeaconState) Slashings() solid.Uint64VectorSSZ {
+	return b.slashings
+}
+
+func (b *BeaconState) Balances() solid.Uint64ListSSZ {
+	return b.balances
+}
+
+func (b *BeaconState) InactivityScores() solid.Uint64ListSSZ {
+	return b.inactivityScores
+}
+
 func (b *BeaconState) Eth1DepositIndex() uint64 {
 	return b.eth1DepositIndex
+}
+
+func (b *BeaconState) ValidatorSet() *solid.ValidatorSet {
+	return b.validators
+}
+
+func (b *BeaconState) PreviousEpochParticipation() *solid.BitList {
+	return b.previousEpochParticipation
+}
+
+func (b *BeaconState) CurrentEpochParticipation() *solid.BitList {
+	return b.currentEpochParticipation
 }
 
 func (b *BeaconState) ValidatorLength() int {
@@ -104,6 +128,13 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.balances.Get(index), nil
+}
+
+func (b *BeaconState) ValidatorPublicKey(index int) (libcommon.Bytes48, error) {
+	if index >= b.balances.Length() {
+		return libcommon.Bytes48{}, ErrInvalidValidatorIndex
+	}
+	return b.validators.Get(index).PublicKey(), nil
 }
 
 func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {

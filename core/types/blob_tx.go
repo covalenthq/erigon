@@ -1,16 +1,17 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/rlp"
@@ -47,13 +48,48 @@ func (stx BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg, err := stx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
-	if err != nil {
-		return Message{}, err
+	msg := Message{
+		nonce:      stx.Nonce,
+		gasLimit:   stx.Gas,
+		gasPrice:   *stx.FeeCap,
+		tip:        *stx.Tip,
+		feeCap:     *stx.FeeCap,
+		to:         stx.To,
+		amount:     *stx.Value,
+		data:       stx.Data,
+		accessList: stx.AccessList,
+		checkNonce: true,
 	}
+	if !rules.IsCancun {
+		return msg, errors.New("BlobTx transactions require Cancun")
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	if msg.gasPrice.Gt(stx.FeeCap) {
+		msg.gasPrice.Set(stx.FeeCap)
+	}
+	var err error
+	msg.from, err = stx.Sender(s)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
+}
+
+func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
+	if sc := stx.from.Load(); sc != nil {
+		return sc.(libcommon.Address), nil
+	}
+	addr, err := signer.Sender(stx)
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+	stx.from.Store(addr)
+	return addr, nil
 }
 
 func (stx BlobTx) Hash() libcommon.Hash {
@@ -102,12 +138,8 @@ func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, b
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
-	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
-	if blobHashesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(blobHashesLen)))
-	}
-	payloadSize += blobHashesLen
+	payloadSize += rlp2.ListPrefixLen(blobHashesLen) + blobHashesLen
 	return
 }
 
@@ -202,12 +234,8 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 
 func (stx BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
-	envelopeSize := payloadSize
-	if payloadSize >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
-	}
 	// size of struct prefix and TxType
-	envelopeSize += 2
+	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
@@ -301,7 +329,9 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
-
+	if len(stx.BlobVersionedHashes) == 0 {
+		return fmt.Errorf("a blob tx must contain at least one blob")
+	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

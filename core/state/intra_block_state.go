@@ -547,16 +547,17 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if contractCreation {
-		if previous != nil && previous.selfdestructed {
-			prevInc = previous.data.Incarnation
+	if previous != nil && previous.selfdestructed {
+		prevInc = previous.data.Incarnation
+	} else {
+		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
+			prevInc = inc
 		} else {
-			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-				prevInc = inc
-			} else {
-				sdb.savedErr = err
-			}
+			sdb.savedErr = err
 		}
+	}
+	if previous != nil && prevInc < previous.data.PrevIncarnation {
+		prevInc = previous.data.PrevIncarnation
 	}
 
 	newObj := sdb.createObject(addr, previous)
@@ -564,6 +565,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
 	newObj.data.Initialised = true
+	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
@@ -792,15 +794,17 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 }
 
 // AddAddressToAccessList adds the given address to the access list
-func (sdb *IntraBlockState) AddAddressToAccessList(addr libcommon.Address) {
-	if sdb.accessList.AddAddress(addr) {
+func (sdb *IntraBlockState) AddAddressToAccessList(addr libcommon.Address) (addrMod bool) {
+	addrMod = sdb.accessList.AddAddress(addr)
+	if addrMod {
 		sdb.journal.append(accessListAddAccountChange{&addr})
 	}
+	return addrMod
 }
 
 // AddSlotToAccessList adds the given (address, slot)-tuple to the access list
-func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) {
-	addrMod, slotMod := sdb.accessList.AddSlot(addr, slot)
+func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) (addrMod, slotMod bool) {
+	addrMod, slotMod = sdb.accessList.AddSlot(addr, slot)
 	if addrMod {
 		// In practice, this should not happen, since there is no way to enter the
 		// scope of 'address' without having the 'address' become already added
@@ -814,6 +818,7 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot lib
 			slot:    &slot,
 		})
 	}
+	return addrMod, slotMod
 }
 
 // AddressInAccessList returns true if the given address is in the access list.
@@ -821,7 +826,6 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 	return sdb.accessList.ContainsAddress(addr)
 }
 
-// SlotInAccessList returns true if the given (address, slot)-tuple is in the access list.
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
 }

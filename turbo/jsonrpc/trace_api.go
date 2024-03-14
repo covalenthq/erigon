@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 
 	jsoniter "github.com/json-iterator/go"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // TraceAPI RPC interface into tracing API
 type TraceAPI interface {
 	// Ad-hoc (see ./trace_adhoc.go)
+
 	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool) ([]*TraceCallResult, error)
 	ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string, gasBailOut *bool) (*TraceCallResult, error)
 	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash) (*TraceCallResult, error)
@@ -23,6 +24,7 @@ type TraceAPI interface {
 	RawTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) ([]interface{}, error)
 
 	// Filtering (see ./trace_filtering.go)
+
 	Transaction(ctx context.Context, txHash libcommon.Hash, gasBailOut *bool) (ParityTraces, error)
 	Get(ctx context.Context, txHash libcommon.Hash, txIndicies []hexutil.Uint64, gasBailOut *bool) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool) (ParityTraces, error)

@@ -21,19 +21,20 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
+//
+//go:generate mockgen -destination=./mock/chain_header_reader_mock.go -package=mock . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -55,6 +56,9 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
+
+	// Byte string representation of a bor span with given ID
+	BorSpan(spanId uint64) []byte
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -119,6 +123,9 @@ type EngineReader interface {
 
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
 	) ([]Reward, error)
+
+	// Close terminates any background threads, DB's etc maintained by the consensus engine.
+	Close() error
 }
 
 // EngineReader are write methods of the consensus engine
@@ -179,9 +186,6 @@ type EngineWriter interface {
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
-
-	// Close terminates any background threads maintained by the consensus engine.
-	Close() error
 }
 
 // PoW is a consensus engine based on proof-of-work.

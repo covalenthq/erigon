@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/metrics"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -56,15 +56,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
 		}
 	}
-	if version >= clparams.DenebVersion {
-		verified, err := impl.VerifyKzgCommitmentsAgainstTransactions(block.Body.ExecutionPayload.Transactions, block.Body.BlobKzgCommitments)
-		if err != nil {
-			return fmt.Errorf("processBlock: failed to process blob kzg commitments: %w", err)
-		}
-		if !verified {
-			return fmt.Errorf("processBlock: failed to process blob kzg commitments: commitments are not equal")
-		}
-	}
+
 	h.PutSince()
 	return nil
 }

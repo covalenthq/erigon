@@ -5,11 +5,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,7 +68,11 @@ var historicalRootsUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) 
 })
 
 var inactivityUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessInactivityScores(s, state.EligibleValidatorsIndicies(s), statechange.GetUnslashedIndiciesSet(s))
+	var unslashedIndiciesSet [][]bool
+	if s.Version() >= clparams.AltairVersion {
+		unslashedIndiciesSet = statechange.GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+	}
+	return statechange.ProcessInactivityScores(s, state.EligibleValidatorsIndicies(s), unslashedIndiciesSet)
 })
 
 var justificationFinalizationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
@@ -91,7 +97,11 @@ var registryUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error 
 })
 
 var rewardsAndPenaltiesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), statechange.GetUnslashedIndiciesSet(s))
+	var unslashedIndiciesSet [][]bool
+	if s.Version() >= clparams.AltairVersion {
+		unslashedIndiciesSet = statechange.GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+	}
+	return statechange.ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), unslashedIndiciesSet)
 })
 
 var slashingsTest = NewEpochProcessing(func(s abstract.BeaconState) error {

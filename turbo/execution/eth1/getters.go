@@ -14,6 +14,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -130,17 +131,23 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		h := gointerfaces.ConvertH256ToHash(hash)
 		number := rawdb.ReadHeaderNumber(tx, h)
 		if number == nil {
-			break
+			bodies = append(bodies, nil)
+			continue
 		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
 			return nil, err
 		}
 		if body == nil {
-			break
+			bodies = append(bodies, nil)
+			continue
+		}
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, err
 		}
 		bodies = append(bodies, &execution.BlockBody{
-			Transactions: body.RawBody().Transactions,
+			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
@@ -171,10 +178,27 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		if err != nil {
 			return nil, err
 		}
+		if body == nil {
+			// Append nil and no further processing
+			bodies = append(bodies, nil)
+			continue
+		}
+
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, err
+		}
 		bodies = append(bodies, &execution.BlockBody{
-			Transactions: body.RawBody().Transactions,
+			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
+	}
+	// Remove trailing nil values as per spec
+	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
+	for i := len(bodies) - 1; i >= 0; i-- {
+		if bodies[i] == nil {
+			bodies = bodies[:i]
+		}
 	}
 
 	return &execution.GetBodiesBatchResponse{
@@ -282,5 +306,11 @@ func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceHead(tx)),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceFinalized(tx)),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceSafe(tx)),
+	}, nil
+}
+
+func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*execution.FrozenBlocksResponse, error) {
+	return &execution.FrozenBlocksResponse{
+		FrozenBlocks: e.blockReader.FrozenBlocks(),
 	}, nil
 }

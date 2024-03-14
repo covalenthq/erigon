@@ -3,8 +3,9 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -42,7 +42,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("Found block num %d, ok %t\n", blockNum, ok)
 	}
 	if ok {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -78,7 +77,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
-		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		return NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
@@ -193,7 +192,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+	return NewRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -257,7 +256,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return newRPCBorTransaction(borTx, derivedBorTxHash, hash, blockNum, uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
-	return newRPCTransaction(txs[txIndex], hash, blockNum, uint64(txIndex), block.BaseFee()), nil
+	return NewRPCTransaction(txs[txIndex], hash, blockNum, uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.

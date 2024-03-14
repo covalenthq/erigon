@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -16,11 +18,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -42,9 +44,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
+	loopBreakCheck  func(int) bool
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -60,8 +63,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		chainConfig:     chainCfg,
 		prune:           prune,
 		hd:              hd,
-
-		blockReader: blockReader,
+		blockReader:     blockReader,
+		loopBreakCheck:  loopBreakCheck,
 	}
 }
 
@@ -196,6 +199,10 @@ Loop:
 			break
 		}
 
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNumber-startFrom)) {
+			break
+		}
+
 		has, err := cfg.blockReader.HasSenders(ctx, tx, blockHash, blockNumber)
 		if err != nil {
 			return err
@@ -258,12 +265,12 @@ Loop:
 			return minBlockErr
 		}
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil {
+		if cfg.hd != nil && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 
 		if to > s.BlockNumber {
-			u.UnwindTo(minBlockNum-1, minBlockHash)
+			u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr))
 		}
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
@@ -328,7 +335,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
-				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
+				job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %v",
+					consensus.ErrInvalidBlock, tx.Hash(), err)
 				break
 			}
 			copy(job.senders[i*length.Addr:], from[:])

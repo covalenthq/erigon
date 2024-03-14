@@ -56,7 +56,7 @@ func TestGoerliForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x62, 0x89, 0x41, 0xef}, digest)
+	require.Equal(t, [4]uint8{0xa7, 0x5d, 0xcc, 0xf2}, digest)
 }
 
 func TestSepoliaForkDigest(t *testing.T) {
@@ -66,7 +66,7 @@ func TestSepoliaForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x47, 0xeb, 0x72, 0xb3}, digest)
+	require.Equal(t, [4]uint8{0xd3, 0x1f, 0x61, 0x91}, digest)
 }
 
 // ForkDigestVersion
@@ -124,7 +124,7 @@ func TestMainnetForkDigestDenebVersion(t *testing.T) {
 func TestMainnetComputeForkNextDigest(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	beaconCfg.ForkVersionSchedule = make(map[[4]byte]uint64)
+	beaconCfg.ForkVersionSchedule = make(map[common.Bytes4]uint64)
 	beaconCfg.ForkVersionSchedule[utils.Uint32ToBytes4(uint32(clparams.Phase0Version))] = 0
 	beaconCfg.ForkVersionSchedule[utils.Uint32ToBytes4(uint32(clparams.BellatrixVersion))] = 210010230210301201
 	digest, err := ComputeNextForkDigest(&beaconCfg, &genesisCfg)

@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
@@ -53,7 +54,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -111,7 +112,11 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
+	args := []interface{}{request}
+	if versionedHashes != nil {
+		args = append(args, versionedHashes, *beaconParentRoot)
+	}
+	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, args...)
 	if err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return
@@ -223,4 +228,8 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*typ
 		}
 	}
 	return ret, nil
+}
+
+func (cc *ExecutionClientRpc) FrozenBlocks() uint64 {
+	panic("unimplemented")
 }

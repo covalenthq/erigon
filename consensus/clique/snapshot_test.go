@@ -23,6 +23,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -35,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -392,6 +394,7 @@ func TestClique(t *testing.T) {
 		tt := tt
 
 		t.Run(tt.name, func(t *testing.T) {
+			logger := testlog.Logger(t, log.LvlInfo)
 			// Create the account pool and generate the initial set of signers
 			accounts := newTesterAccountPool()
 
@@ -477,7 +480,7 @@ func TestClique(t *testing.T) {
 					chainX.Headers[k] = b.Header()
 				}
 				chainX.TopBlock = batches[j][len(batches[j])-1]
-				if err = m.InsertChain(chainX, nil); err != nil {
+				if err = m.InsertChain(chainX); err != nil {
 					t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 					failed = true
 					break
@@ -493,7 +496,7 @@ func TestClique(t *testing.T) {
 				chainX.Headers[k] = b.Header()
 			}
 			chainX.TopBlock = batches[len(batches)-1][len(batches[len(batches)-1])-1]
-			err = m.InsertChain(chainX, nil)
+			err = m.InsertChain(chainX)
 			if tt.failure != nil && err == nil {
 				t.Errorf("test %d: expected failure", i)
 			}
@@ -509,7 +512,13 @@ func TestClique(t *testing.T) {
 
 			var snap *clique.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				snap, err = engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: m.BlockReader}, head.NumberU64(), head.Hash(), nil)
+				chainReader := stagedsync.ChainReader{
+					Cfg:         config,
+					Db:          tx,
+					BlockReader: m.BlockReader,
+					Logger:      logger,
+				}
+				snap, err = engine.Snapshot(chainReader, head.NumberU64(), head.Hash(), nil)
 				if err != nil {
 					return err
 				}

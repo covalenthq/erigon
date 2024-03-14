@@ -1,30 +1,37 @@
 package devnet
 
 import (
-	context "context"
+	"context"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	enode "github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 type Node interface {
 	requests.RequestGenerator
-	Name() string
+	GetName() string
 	ChainID() *big.Int
+	GetHttpPort() int
+	GetEnodeURL() string
 	Account() *accounts.Account
 	IsBlockProducer() bool
+	Configure(baseNode args.NodeArgs, nodeNumber int) error
+	EnableMetrics(port int)
 }
 
 type NodeSelector interface {
@@ -38,7 +45,7 @@ func (f NodeSelectorFunc) Test(ctx context.Context, node Node) bool {
 }
 
 func HTTPHost(n Node) string {
-	if n, ok := n.(*node); ok {
+	if n, ok := n.(*devnetNode); ok {
 		host := n.nodeCfg.Http.HttpListenAddress
 
 		if host == "" {
@@ -51,10 +58,10 @@ func HTTPHost(n Node) string {
 	return ""
 }
 
-type node struct {
+type devnetNode struct {
 	sync.Mutex
 	requests.RequestGenerator
-	args     interface{}
+	nodeArgs Node
 	wg       *sync.WaitGroup
 	network  *Network
 	startErr chan error
@@ -63,7 +70,7 @@ type node struct {
 	ethNode  *enode.ErigonNode
 }
 
-func (n *node) Stop() {
+func (n *devnetNode) Stop() {
 	var toClose *enode.ErigonNode
 
 	n.Lock()
@@ -80,13 +87,13 @@ func (n *node) Stop() {
 	n.done()
 }
 
-func (n *node) running() bool {
+func (n *devnetNode) running() bool {
 	n.Lock()
 	defer n.Unlock()
 	return n.startErr == nil && n.ethNode != nil
 }
 
-func (n *node) done() {
+func (n *devnetNode) done() {
 	n.Lock()
 	defer n.Unlock()
 	if n.wg != nil {
@@ -96,39 +103,43 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) IsBlockProducer() bool {
-	_, isBlockProducer := n.args.(args.BlockProducer)
-	return isBlockProducer
-}
-
-func (n *node) Account() *accounts.Account {
-	if miner, ok := n.args.(args.BlockProducer); ok {
-		return miner.Account()
-	}
-
+func (n *devnetNode) Configure(args.NodeArgs, int) error {
 	return nil
 }
 
-func (n *node) Name() string {
-	if named, ok := n.args.(interface{ Name() string }); ok {
-		return named.Name()
-	}
-
-	return ""
+func (n *devnetNode) IsBlockProducer() bool {
+	return n.nodeArgs.IsBlockProducer()
 }
 
-func (n *node) ChainID() *big.Int {
-	if n.ethCfg != nil {
-		return n.ethCfg.Genesis.Config.ChainID
-	}
+func (n *devnetNode) Account() *accounts.Account {
+	return n.nodeArgs.Account()
+}
 
-	return nil
+func (n *devnetNode) GetName() string {
+	return n.nodeArgs.GetName()
+}
+
+func (n *devnetNode) ChainID() *big.Int {
+	return n.nodeArgs.ChainID()
+}
+
+func (n *devnetNode) GetHttpPort() int {
+	return n.nodeArgs.GetHttpPort()
+}
+
+func (n *devnetNode) GetEnodeURL() string {
+	return n.nodeArgs.GetEnodeURL()
+}
+
+func (n *devnetNode) EnableMetrics(int) {
+	panic("not implemented")
 }
 
 // run configures, creates and serves an erigon node
-func (n *node) run(ctx *cli.Context) error {
+func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
+	var metricsMux *http.ServeMux
 
 	defer n.done()
 	defer func() {
@@ -141,7 +152,7 @@ func (n *node) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if logger, metricsMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -156,15 +167,26 @@ func (n *node) run(ctx *cli.Context) error {
 	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 
-	for addr, account := range n.network.Alloc {
-		n.ethCfg.Genesis.Alloc[addr] = account
+	if n.network.Genesis != nil {
+		for addr, account := range n.network.Genesis.Alloc {
+			n.ethCfg.Genesis.Alloc[addr] = account
+		}
+
+		if n.network.Genesis.GasLimit != 0 {
+			n.ethCfg.Genesis.GasLimit = n.network.Genesis.GasLimit
+		}
 	}
 
 	if n.network.BorStateSyncDelay > 0 {
-		n.ethCfg.Bor.StateSyncConfirmationDelay = map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
+		stateSyncConfirmationDelay := map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
+		logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
 	}
 
-	n.ethNode, err = enode.New(n.nodeCfg, n.ethCfg, logger)
+	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
+
+	if metricsMux != nil {
+		diagnostics.Setup(ctx, metricsMux, n.ethNode)
+	}
 
 	n.Lock()
 	if n.startErr != nil {

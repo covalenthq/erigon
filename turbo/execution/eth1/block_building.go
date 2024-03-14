@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -32,7 +31,7 @@ func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdraw
 }
 
 func (e *EthereumExecutionModule) evictOldBuilders() {
-	ids := common.SortedKeys(e.builders)
+	ids := libcommon.SortedKeys(e.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
@@ -67,12 +66,15 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	}
 
 	// First check if we're already building a block with the requested parameters
-	if reflect.DeepEqual(e.lastParameters, &param) {
-		e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &execution.AssembleBlockResponse{
-			Id:   e.nextPayloadId,
-			Busy: false,
-		}, nil
+	if e.lastParameters != nil {
+		param.PayloadId = e.lastParameters.PayloadId
+		if reflect.DeepEqual(e.lastParameters, &param) {
+			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+			return &execution.AssembleBlockResponse{
+				Id:   e.lastParameters.PayloadId,
+				Busy: false,
+			}, nil
+		}
 	}
 
 	// Initiate payload building

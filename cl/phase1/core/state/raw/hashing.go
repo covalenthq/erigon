@@ -1,10 +1,13 @@
 package raw
 
 import (
+	"time"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
@@ -18,6 +21,45 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	// Pad to 32 of length
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves, out[:])
 	return
+}
+
+func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	return merkle_tree.MerkleProof(5, 22, schema...)
+}
+
+func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	return merkle_tree.MerkleProof(5, 23, schema...)
+}
+
+func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	proof, err := merkle_tree.MerkleProof(5, 20, schema...)
+	if err != nil {
+		return nil, err
+	}
+
+	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch())}, proof...)
+	return proof, nil
 }
 
 func preparateRootsForHashing(roots []common.Hash) [][32]byte {
@@ -82,6 +124,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(StateRootsLeafIndex, root)
 	}
 
+	begin := time.Now()
+
 	// Field(7): HistoricalRoots
 	if b.isLeafDirty(HistoricalRootsLeafIndex) {
 		root, err := b.historicalRoots.HashSSZ()
@@ -90,6 +134,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(HistoricalRootsLeafIndex, root)
 	}
+	log.Trace("HistoricalRoots hashing", "elapsed", time.Since(begin))
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
@@ -114,6 +159,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(Eth1DepositIndexLeafIndex, merkle_tree.Uint64Root(b.eth1DepositIndex))
 	}
 
+	begin = time.Now()
+
 	// Field(11): Validators
 	if b.isLeafDirty(ValidatorsLeafIndex) {
 		root, err := b.validators.HashSSZ()
@@ -123,7 +170,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(ValidatorsLeafIndex, root)
 
 	}
+	log.Trace("ValidatorSet hashing", "elapsed", time.Since(begin))
 
+	begin = time.Now()
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
 		root, err := b.balances.HashSSZ()
@@ -132,7 +181,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
+	log.Trace("Balances hashing", "elapsed", time.Since(begin))
 
+	begin = time.Now()
 	// Field(13): RandaoMixes
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
 		root, err := b.randaoMixes.HashSSZ()
@@ -141,7 +192,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(RandaoMixesLeafIndex, root)
 	}
+	log.Trace("RandaoMixes hashing", "elapsed", time.Since(begin))
 
+	begin = time.Now()
 	// Field(14): Slashings
 	if b.isLeafDirty(SlashingsLeafIndex) {
 		root, err := b.slashings.HashSSZ()
@@ -150,8 +203,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(SlashingsLeafIndex, root)
 	}
+	log.Trace("Slashings hashing", "elapsed", time.Since(begin))
 	// Field(15) and Field(16) are special due to the fact that they have different format in Phase0.
 
+	begin = time.Now()
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
 		var root libcommon.Hash
@@ -167,6 +222,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 		b.updateLeaf(PreviousEpochParticipationLeafIndex, root)
 	}
+	log.Trace("PreviousEpochParticipation hashing", "elapsed", time.Since(begin))
+
+	begin = time.Now()
 
 	// Field(16): CurrentEpochParticipation
 	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
@@ -182,6 +240,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(CurrentEpochParticipationLeafIndex, root)
 	}
+	log.Trace("CurrentEpochParticipation hashing", "elapsed", time.Since(begin))
 
 	// Field(17): JustificationBits
 	if b.isLeafDirty(JustificationBitsLeafIndex) {
@@ -218,6 +277,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	if b.version == clparams.Phase0Version {
 		return nil
 	}
+	begin = time.Now()
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
 		root, err := b.inactivityScores.HashSSZ()
@@ -226,6 +286,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(InactivityScoresLeafIndex, root)
 	}
+	log.Trace("InactivityScores hashing", "elapsed", time.Since(begin))
 
 	// Field(22): CurrentSyncCommitte
 	if b.isLeafDirty(CurrentSyncCommitteeLeafIndex) {
@@ -271,6 +332,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(NextWithdrawalValidatorIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalValidatorIndex))
 	}
 
+	begin = time.Now()
 	// Field(27): HistoricalSummaries
 	if b.isLeafDirty(HistoricalSummariesLeafIndex) {
 		root, err := b.historicalSummaries.HashSSZ()
@@ -279,6 +341,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(HistoricalSummariesLeafIndex, root)
 	}
+	log.Trace("HistoricalSummaries hashing", "elapsed", time.Since(begin))
 
 	return nil
 }
