@@ -33,6 +33,9 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
 		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+		BlobGasUsed      *math.HexOrDecimal64                              `json:"blobGasUsed" rlp:"optional"`
+		ExcessBlobGas    *math.HexOrDecimal64                                `json:"excessBlobGas" rlp:"optional"`
+		ParentBeaconRoot *libcommon.Hash                       `json:"parentBeaconBlockRoot" rlp:"optional"`
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
@@ -49,6 +52,9 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.ParentUncleHash = s.ParentUncleHash
 	enc.UncleHash = s.UncleHash
 	enc.Withdrawals = s.Withdrawals
+	enc.BlobGasUsed = (*math.HexOrDecimal64)(s.BlobGasUsed)
+	enc.ExcessBlobGas = (*math.HexOrDecimal64)(s.ExcessBlobGas)
+	enc.ParentBeaconRoot = s.ParentBeaconRoot
 	return json.Marshal(&enc)
 }
 
@@ -69,6 +75,9 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
 		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+		BlobGasUsed      *math.HexOrDecimal64                              `json:"blobGasUsed" rlp:"optional"`
+		ExcessBlobGas    *math.HexOrDecimal64                                `json:"excessBlobGas" rlp:"optional"`
+		ParentBeaconRoot *libcommon.Hash                       `json:"parentBeaconBlockRoot" rlp:"optional"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -117,6 +126,15 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	s.UncleHash = dec.UncleHash
 	if dec.Withdrawals != nil {
 		s.Withdrawals = dec.Withdrawals
+	}
+	if dec.BlobGasUsed != nil {
+		s.BlobGasUsed = (*uint64)(dec.BlobGasUsed)
+	}
+	if dec.ExcessBlobGas != nil {
+		s.ExcessBlobGas = (*uint64)(dec.ExcessBlobGas)
+	}
+	if dec.ParentBeaconRoot != nil {
+		s.ParentBeaconRoot = dec.ParentBeaconRoot
 	}
 
 	return nil

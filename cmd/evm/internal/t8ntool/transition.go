@@ -454,7 +454,7 @@ func execute(ctx *cli.Context) error {
 			Senders:         inputReplica.Senders, // avoid sender recovery (expensive) by using cached senders
 		}
 
-		//fmt.Println(exportBlockReplica) // should use dispatch output for this.s
+		// fmt.Println(exportBlockReplica) // should use dispatch output for this.s
 	}
 
 	return dispatchOutput(ctx, baseDir, result, collector, body, blockResult)
@@ -727,6 +727,9 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.ExcessBlobGas = env.ExcessBlobGas
+	header.BlobGasUsed = env.BlobGasUsed
+	header.ParentBeaconBlockRoot = env.ParentBeaconRoot
 
 	return &header
 }

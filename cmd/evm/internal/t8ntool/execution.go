@@ -61,6 +61,9 @@ type stEnv struct {
 	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
+	BlobGasUsed      *uint64                                `json:"blobGasUsed" rlp:"optional"`
+	ExcessBlobGas    *uint64                                `json:"excessBlobGas" rlp:"optional"`
+	ParentBeaconRoot *libcommon.Hash                        `json:"parentBeaconBlockRoot" rlp:"optional"`
 }
 
 type stEnvMarshaling struct {
@@ -73,6 +76,9 @@ type stEnvMarshaling struct {
 	Timestamp        math.HexOrDecimal64
 	ParentTimestamp  math.HexOrDecimal64
 	BaseFee          *math.HexOrDecimal256
+	BlobGasUsed      *math.HexOrDecimal64
+	ExcessBlobGas    *math.HexOrDecimal64
+	ParentBeaconRoot *libcommon.Address
 }
 
 func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
@@ -99,6 +105,9 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	stEnv.Withdrawals = replica.GetWithdrawals()
 	stEnv.Random = replica.Header.MixDigest.Big()
 	stEnv.MixDigest = replica.Header.MixDigest
+	stEnv.BlobGasUsed = replica.Header.BlobGasUsed
+	stEnv.ExcessBlobGas = replica.Header.ExcessBlobGas
+	stEnv.ParentBeaconRoot = replica.Header.ParentBeaconRoot
 	//stEnv.ParentDifficulty = replica. // not needed if end.Difficulty is provided (and it IS provided)
 	//stEnv.ParentTimestamp // not needed if end.Difficulty is provided (and it IS provided)
 }

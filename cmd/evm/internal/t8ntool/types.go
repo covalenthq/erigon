@@ -76,23 +76,26 @@ func (b *Bloom) SetBytes(d []byte) {
 }
 
 type Header struct {
-	ParentHash      common.Hash    `json:"parentHash"`
-	UncleHash       common.Hash    `json:"sha3Uncles"`
-	Coinbase        common.Address `json:"miner"`
-	Root            common.Hash    `json:"stateRoot"`
-	TxHash          common.Hash    `json:"transactionsRoot"`
-	ReceiptHash     common.Hash    `json:"receiptsRoot"`
-	Bloom           Bloom          `json:"logsBloom"`
-	Difficulty      *BigInt        `json:"difficulty"`
-	Number          *BigInt        `json:"number"`
-	GasLimit        uint64         `json:"gasLimit"`
-	GasUsed         uint64         `json:"gasUsed"`
-	Time            uint64         `json:"timestamp"`
-	Extra           []byte         `json:"extraData"`
-	MixDigest       common.Hash    `json:"mixHash"`
-	Nonce           BlockNonce     `json:"nonce"`
-	BaseFee         *BigInt        `json:"baseFeePerGas"`
-	WithdrawalsHash *common.Hash   `json:"withdrawalsRoot" rlp:"nil,optional"`
+	ParentHash       common.Hash    `json:"parentHash"`
+	UncleHash        common.Hash    `json:"sha3Uncles"`
+	Coinbase         common.Address `json:"miner"`
+	Root             common.Hash    `json:"stateRoot"`
+	TxHash           common.Hash    `json:"transactionsRoot"`
+	ReceiptHash      common.Hash    `json:"receiptsRoot"`
+	Bloom            Bloom          `json:"logsBloom"`
+	Difficulty       *BigInt        `json:"difficulty"`
+	Number           *BigInt        `json:"number"`
+	GasLimit         uint64         `json:"gasLimit"`
+	GasUsed          uint64         `json:"gasUsed"`
+	Time             uint64         `json:"timestamp"`
+	Extra            []byte         `json:"extraData"`
+	MixDigest        common.Hash    `json:"mixHash"`
+	Nonce            BlockNonce     `json:"nonce"`
+	BaseFee          *BigInt        `json:"baseFeePerGas"`
+	WithdrawalsHash  *common.Hash   `json:"withdrawalsRoot" rlp:"nil,optional"`
+	BlobGasUsed      *uint64        `json:"blobGasUsed" rlp:"optional"`
+	ExcessBlobGas    *uint64        `json:"excessBlobGas" rlp:"optional"`
+	ParentBeaconRoot *common.Hash   `json:"parentBeaconBlockRoot" rlp:"optional"`
 }
 
 type Transaction struct {
@@ -159,22 +162,25 @@ type BlockhashRead struct {
 
 func adaptHeader(header *types2.Header) (*Header, error) {
 	return &Header{
-		ParentHash:  header.ParentHash,
-		UncleHash:   header.UncleHash,
-		Coinbase:    header.Coinbase,
-		Root:        header.Root,
-		TxHash:      header.TxHash,
-		ReceiptHash: header.ReceiptHash,
-		Bloom:       BytesToBloom(header.Bloom.Bytes()),
-		Difficulty:  &BigInt{header.Difficulty},
-		Number:      &BigInt{header.Number},
-		GasLimit:    header.GasLimit,
-		GasUsed:     header.GasUsed,
-		Time:        header.Time,
-		Extra:       header.Extra,
-		MixDigest:   header.MixDigest,
-		Nonce:       EncodeNonce(header.Nonce.Uint64()),
-		BaseFee:     &BigInt{header.BaseFee},
+		ParentHash:       header.ParentHash,
+		UncleHash:        header.UncleHash,
+		Coinbase:         header.Coinbase,
+		Root:             header.Root,
+		TxHash:           header.TxHash,
+		ReceiptHash:      header.ReceiptHash,
+		Bloom:            BytesToBloom(header.Bloom.Bytes()),
+		Difficulty:       &BigInt{header.Difficulty},
+		Number:           &BigInt{header.Number},
+		GasLimit:         header.GasLimit,
+		GasUsed:          header.GasUsed,
+		Time:             header.Time,
+		Extra:            header.Extra,
+		MixDigest:        header.MixDigest,
+		Nonce:            EncodeNonce(header.Nonce.Uint64()),
+		BaseFee:          &BigInt{header.BaseFee},
+		BlobGasUsed:      header.BlobGasUsed,
+		ExcessBlobGas:    header.ExcessBlobGas,
+		ParentBeaconRoot: header.ParentBeaconBlockRoot,
 	}, nil
 }
 
@@ -185,6 +191,9 @@ func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
 	header.Extra = inputReplica.Header.Extra
 	header.ReceiptHash = inputReplica.Header.ReceiptHash
 	header.WithdrawalsHash = inputReplica.Header.WithdrawalsHash
+	// header.BlobGasUsed = inputReplica.Header.BlobGasUsed
+	// header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
+	// header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
 }
 
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
