@@ -284,6 +284,47 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 		setSignatureValues(&dynamicFeeTx.CommonTx, tx.V, tx.R, tx.S)
 		return &dynamicFeeTx, nil
 
+	case types.BlobTxType:
+		var tip *uint256.Int
+		var feeCap *uint256.Int
+		if tx.GasTipCap != nil {
+			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		if tx.GasFeeCap != nil {
+			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		dynamicFeeTx := types2.DynamicFeeTransaction{
+			CommonTx: types2.CommonTx{
+				Nonce: uint64(tx.AccountNonce),
+				To:    tx.Recipient,
+				Value: value,
+				Gas:   uint64(tx.GasLimit),
+				Data:  tx.Payload,
+			},
+			ChainID:    chainId,
+			Tip:        tip,
+			FeeCap:     feeCap,
+			AccessList: tx.AccessList,
+		}
+
+		blobTx := types2.BlobTx{
+			DynamicFeeTransaction: dynamicFeeTx,
+		}
+
+		if tx.Sender != nil {
+			blobTx.DynamicFeeTransaction.CommonTx.SetFrom(*tx.Sender)
+		}
+		setSignatureValues(&blobTx.DynamicFeeTransaction.CommonTx, tx.V, tx.R, tx.S)
+		return &dynamicFeeTx, nil
+
 	default:
 		return nil, nil
 

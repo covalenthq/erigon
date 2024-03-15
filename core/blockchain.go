@@ -92,7 +92,7 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 
 	usedGas := new(uint64)
-	usedBlobGas := new(uint64)
+	usedBlobGas := header.BlobGasUsed
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
