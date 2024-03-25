@@ -31,17 +31,10 @@ var (
 
 // see https://calver.org
 const (
-<<<<<<< HEAD
 	VersionMajor       = 2  // Major version component of the current release
 	VersionMinor       = 59 // Minor version component of the current release
 	VersionMicro       = 0  // Patch version component of the current release
 	VersionModifier    = "" // Modifier component of the current release
-=======
-	VersionMajor       = 2        // Major version component of the current release
-	VersionMinor       = 45       // Minor version component of the current release
-	VersionMicro       = 0        // Patch version component of the current release
-	VersionModifier    = "stable" // Modifier component of the current release
->>>>>>> ae3983347c (Stable modifications)
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
 )
