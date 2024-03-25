@@ -1,7 +1,7 @@
 project_name: erigon
 
 release:
-  disable: false
+  disable: true
   draft: true
   prerelease: auto
 
