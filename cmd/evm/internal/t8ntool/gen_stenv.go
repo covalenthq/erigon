@@ -33,9 +33,9 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
 		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
-		BlobGasUsed      *math.HexOrDecimal64                              `json:"blobGasUsed" rlp:"optional"`
-		ExcessBlobGas    *math.HexOrDecimal64                                `json:"excessBlobGas" rlp:"optional"`
-		ParentBeaconRoot *libcommon.Hash                       `json:"parentBeaconBlockRoot" rlp:"optional"`
+		BlobGasUsed      *math.HexOrDecimal64                   `json:"blobGasUsed" rlp:"optional"`
+		ExcessBlobGas    *math.HexOrDecimal64                   `json:"excessBlobGas" rlp:"optional"`
+		ParentBeaconRoot *libcommon.Hash                        `json:"parentBeaconBlockRoot" rlp:"optional"`
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
@@ -75,9 +75,9 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
 		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
-		BlobGasUsed      *math.HexOrDecimal64                              `json:"blobGasUsed" rlp:"optional"`
-		ExcessBlobGas    *math.HexOrDecimal64                                `json:"excessBlobGas" rlp:"optional"`
-		ParentBeaconRoot *libcommon.Hash                       `json:"parentBeaconBlockRoot" rlp:"optional"`
+		BlobGasUsed      *math.HexOrDecimal64                   `json:"blobGasUsed" rlp:"optional"`
+		ExcessBlobGas    *math.HexOrDecimal64                   `json:"excessBlobGas" rlp:"optional"`
+		ParentBeaconRoot *libcommon.Hash                        `json:"parentBeaconBlockRoot" rlp:"optional"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
