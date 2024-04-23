@@ -452,6 +452,7 @@ func execute(ctx *cli.Context) error {
 			Uncles:          converUncles(ommerHeaders),
 			Receipts:        convertReceipts(result.Receipts),
 			Senders:         inputReplica.Senders, // avoid sender recovery (expensive) by using cached senders
+			BlobTxSidecars:  inputReplica.BlobTxSidecars,
 		}
 
 		// fmt.Println(exportBlockReplica) // should use dispatch output for this.s
@@ -552,7 +553,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 			return legacyTx, nil
 		}
 
-	case types.DynamicFeeTxType:
+	case types.DynamicFeeTxType, types.BlobTxType:
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if txJson.Tip != nil {
@@ -587,7 +588,19 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
 		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
 
-		return &dynamicFeeTx, nil
+		if txJson.Type == types.BlobTxType {
+			blobFee, overflow := uint256.FromBig((*big.Int)(txJson.MaxFeePerBlobGas))
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+			}
+			return &types.BlobTx{
+				DynamicFeeTransaction: dynamicFeeTx,
+				MaxFeePerBlobGas:      blobFee,
+				BlobVersionedHashes:   txJson.BlobVersionedHashes,
+			}, nil
+		} else {
+			return &dynamicFeeTx, nil
+		}
 
 	default:
 		return nil, nil
