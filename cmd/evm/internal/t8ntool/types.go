@@ -31,6 +31,13 @@ type BlockReplica struct {
 	Senders         []common.Address
 	State           *StateSpecimen `json:"State"`
 	Withdrawals     []*Withdrawal
+	BlobTxSidecars  []*BlobTxSidecar
+}
+
+type BlobTxSidecar struct {
+	Blobs       []string // Blobs needed by the blob pool
+	Commitments []string // Commitments needed by the blob pool
+	Proofs      []string // Proofs needed by the blob pool
 }
 
 type Withdrawal struct {
@@ -114,6 +121,9 @@ type Transaction struct {
 	V            *BigInt          `json:"v"`
 	R            *BigInt          `json:"r"`
 	S            *BigInt          `json:"s"`
+	BlobFeeCap   *BigInt          `json:"blobFeeCap" rlp:"optional"`
+	BlobHashes   []common.Hash    `json:"blobHashes" rlp:"optional"`
+	BlobGas      uint64           `json:"blobGas" rlp:"optional"`
 }
 
 type Logs struct {
@@ -191,9 +201,9 @@ func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
 	header.Extra = inputReplica.Header.Extra
 	header.ReceiptHash = inputReplica.Header.ReceiptHash
 	header.WithdrawalsHash = inputReplica.Header.WithdrawalsHash
-	// header.BlobGasUsed = inputReplica.Header.BlobGasUsed
-	// header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
-	// header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
+	header.BlobGasUsed = inputReplica.Header.BlobGasUsed
+	header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
+	header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
 }
 
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
@@ -201,21 +211,21 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 	var chainId *uint256.Int
 	var overflow bool
 	if tx.ChainId != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(tx.ChainId.Int))
+		chainId, overflow = uint256.FromBig(tx.ChainId.Int)
 		if overflow {
 			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
 		}
 	}
 
 	if tx.Amount != nil {
-		value, overflow = uint256.FromBig((*big.Int)(tx.Amount.Int))
+		value, overflow = uint256.FromBig(tx.Amount.Int)
 		if overflow {
 			return nil, fmt.Errorf("value field caused an overflow (uint256)")
 		}
 	}
 
 	if tx.Price != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(tx.Price.Int))
+		gasPrice, overflow = uint256.FromBig(tx.Price.Int)
 		if overflow {
 			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
 		}
@@ -224,9 +234,9 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 	case types.LegacyTxType, types.AccessListTxType:
 		var legacyTx *types2.LegacyTx
 		if tx.Recipient == nil {
-			legacyTx = types2.NewContractCreation(uint64(tx.AccountNonce), value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+			legacyTx = types2.NewContractCreation(tx.AccountNonce, value, tx.GasLimit, gasPrice, tx.Payload)
 		} else {
-			legacyTx = types2.NewTransaction(uint64(tx.AccountNonce), *tx.Recipient, value, uint64(tx.GasLimit), gasPrice, tx.Payload)
+			legacyTx = types2.NewTransaction(tx.AccountNonce, *tx.Recipient, value, tx.GasLimit, gasPrice, tx.Payload)
 		}
 
 		if tx.Sender != nil {
@@ -247,18 +257,18 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 			return legacyTx, nil
 		}
 
-	case types.DynamicFeeTxType:
+	case types.DynamicFeeTxType, types.BlobTxType:
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if tx.GasTipCap != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
+			tip, overflow = uint256.FromBig(tx.GasTipCap.Int)
 			if overflow {
 				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
 			}
 		}
 
 		if tx.GasFeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
+			feeCap, overflow = uint256.FromBig(tx.GasFeeCap.Int)
 			if overflow {
 				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
 			}
@@ -266,10 +276,10 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 
 		dynamicFeeTx := types2.DynamicFeeTransaction{
 			CommonTx: types2.CommonTx{
-				Nonce: uint64(tx.AccountNonce),
+				Nonce: tx.AccountNonce,
 				To:    tx.Recipient,
 				Value: value,
-				Gas:   uint64(tx.GasLimit),
+				Gas:   tx.GasLimit,
 				Data:  tx.Payload,
 			},
 			ChainID:    chainId,
@@ -282,52 +292,25 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 			dynamicFeeTx.CommonTx.SetFrom(*tx.Sender)
 		}
 		setSignatureValues(&dynamicFeeTx.CommonTx, tx.V, tx.R, tx.S)
-		return &dynamicFeeTx, nil
 
-	case types.BlobTxType:
-		var tip *uint256.Int
-		var feeCap *uint256.Int
-		if tx.GasTipCap != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
+		if tx.Type == types.BlobTxType {
+			feeCap, overflow = uint256.FromBig(tx.BlobFeeCap.Int)
 			if overflow {
-				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+				return nil, fmt.Errorf("BlobFeeCap field caused an overflow (uint256)")
 			}
-		}
 
-		if tx.GasFeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
-			if overflow {
-				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			blobTx := types2.BlobTx{
+				DynamicFeeTransaction: dynamicFeeTx,
+				MaxFeePerBlobGas:      feeCap,
+				BlobVersionedHashes:   tx.BlobHashes,
 			}
-		}
 
-		dynamicFeeTx := types2.DynamicFeeTransaction{
-			CommonTx: types2.CommonTx{
-				Nonce: uint64(tx.AccountNonce),
-				To:    tx.Recipient,
-				Value: value,
-				Gas:   uint64(tx.GasLimit),
-				Data:  tx.Payload,
-			},
-			ChainID:    chainId,
-			Tip:        tip,
-			FeeCap:     feeCap,
-			AccessList: tx.AccessList,
+			return &blobTx, nil
+		} else {
+			return &dynamicFeeTx, nil
 		}
-
-		blobTx := types2.BlobTx{
-			DynamicFeeTransaction: dynamicFeeTx,
-		}
-
-		if tx.Sender != nil {
-			blobTx.DynamicFeeTransaction.CommonTx.SetFrom(*tx.Sender)
-		}
-		setSignatureValues(&blobTx.DynamicFeeTransaction.CommonTx, tx.V, tx.R, tx.S)
-		return &dynamicFeeTx, nil
-
 	default:
 		return nil, nil
-
 	}
 }
 
@@ -397,6 +380,7 @@ func convertTransactions(txs types2.Transactions) ([]*Transaction, error) {
 	var Transactions []*Transaction
 	for i, tx := range txs {
 		sender, ok := tx.GetSender()
+		v, r, s := tx.RawSignatureValues()
 		if !ok {
 			return Transactions, fmt.Errorf("tx index %d failed to get sender", i)
 		}
@@ -413,13 +397,25 @@ func convertTransactions(txs types2.Transactions) ([]*Transaction, error) {
 			Recipient:    tx.GetTo(),
 			Amount:       &BigInt{tx.GetValue().ToBig()},
 			Payload:      tx.GetData(),
+			V:            &BigInt{v.ToBig()},
+			R:            &BigInt{r.ToBig()},
+			S:            &BigInt{s.ToBig()},
+			BlobFeeCap:   nil,
+			BlobHashes:   nil,
+			BlobGas:      0,
+		}
+		if tx.Type() == types.BlobTxType {
+			blobTx := tx.(*types2.BlobTx)
+			new_tx.BlobFeeCap = &BigInt{blobTx.MaxFeePerBlobGas.ToBig()}
+			new_tx.BlobHashes = tx.GetBlobHashes()
+			new_tx.BlobGas = tx.GetBlobGas()
 		}
 		Transactions = append(Transactions, new_tx)
 	}
 	return Transactions, nil
 }
 
-func converUncles(ommerHeaders []*types2.Header) []*Header {
+func convertUncles(ommerHeaders []*types2.Header) []*Header {
 	var new_uncles []*Header
 	for _, uncle := range ommerHeaders {
 		adapted_uncle, _ := adaptHeader(uncle)
