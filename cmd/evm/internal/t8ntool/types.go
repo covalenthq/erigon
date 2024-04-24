@@ -31,6 +31,7 @@ type BlockReplica struct {
 	Senders         []common.Address
 	State           *StateSpecimen `json:"State"`
 	Withdrawals     []*Withdrawal
+	BlobTxSidecars  []*BlobTxSidecar
 }
 
 type Withdrawal struct {
@@ -114,6 +115,9 @@ type Transaction struct {
 	V            *BigInt          `json:"v"`
 	R            *BigInt          `json:"r"`
 	S            *BigInt          `json:"s"`
+	BlobFeeCap   *BigInt          `json:"blobFeeCap" rlp:"optional"`
+	BlobHashes   []common.Hash    `json:"blobHashes" rlp:"optional"`
+	BlobGas      uint64           `json:"blobGas" rlp:"optional"`
 }
 
 type Logs struct {
@@ -160,6 +164,13 @@ type BlockhashRead struct {
 	BlockHash   common.Hash
 }
 
+// BlobTxSidecar contains the blobs of a blob transaction.
+type BlobTxSidecar struct {
+	Blobs       []string
+	Commitments []string
+	Proofs      []string
+}
+
 func adaptHeader(header *types2.Header) (*Header, error) {
 	return &Header{
 		ParentHash:       header.ParentHash,
@@ -191,9 +202,9 @@ func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
 	header.Extra = inputReplica.Header.Extra
 	header.ReceiptHash = inputReplica.Header.ReceiptHash
 	header.WithdrawalsHash = inputReplica.Header.WithdrawalsHash
-	// header.BlobGasUsed = inputReplica.Header.BlobGasUsed
-	// header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
-	// header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
+	header.BlobGasUsed = inputReplica.Header.BlobGasUsed
+	header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
+	header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
 }
 
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
@@ -315,15 +326,22 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 			AccessList: tx.AccessList,
 		}
 
+		blobFeeCap, overflow := uint256.FromBig((*big.Int)(tx.BlobFeeCap.Int))
+		if overflow {
+			return nil, fmt.Errorf("BlobFeeCap field caused an overflow (uint256)")
+		}
+
 		blobTx := types2.BlobTx{
 			DynamicFeeTransaction: dynamicFeeTx,
+			MaxFeePerBlobGas:      blobFeeCap,
+			BlobVersionedHashes:   tx.BlobHashes,
 		}
 
 		if tx.Sender != nil {
 			blobTx.DynamicFeeTransaction.CommonTx.SetFrom(*tx.Sender)
 		}
 		setSignatureValues(&blobTx.DynamicFeeTransaction.CommonTx, tx.V, tx.R, tx.S)
-		return &dynamicFeeTx, nil
+		return &blobTx, nil
 
 	default:
 		return nil, nil
@@ -400,6 +418,7 @@ func convertTransactions(txs types2.Transactions) ([]*Transaction, error) {
 		if !ok {
 			return Transactions, fmt.Errorf("tx index %d failed to get sender", i)
 		}
+		v, r, s := tx.RawSignatureValues()
 		new_tx := &Transaction{
 			Type:         tx.Type(),
 			AccessList:   tx.GetAccessList(),
@@ -413,6 +432,18 @@ func convertTransactions(txs types2.Transactions) ([]*Transaction, error) {
 			Recipient:    tx.GetTo(),
 			Amount:       &BigInt{tx.GetValue().ToBig()},
 			Payload:      tx.GetData(),
+			V:            &BigInt{v.ToBig()},
+			R:            &BigInt{r.ToBig()},
+			S:            &BigInt{s.ToBig()},
+			BlobFeeCap:   nil,
+			BlobHashes:   nil,
+			BlobGas:      0,
+		}
+		if tx.Type() == types.BlobTxType {
+			blobTx := tx.(*types2.BlobTx)
+			new_tx.BlobFeeCap = &BigInt{blobTx.MaxFeePerBlobGas.ToBig()}
+			new_tx.BlobHashes = tx.GetBlobHashes()
+			new_tx.BlobGas = tx.GetBlobGas()
 		}
 		Transactions = append(Transactions, new_tx)
 	}
