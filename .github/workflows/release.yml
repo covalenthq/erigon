@@ -8,7 +8,7 @@ name: Release
 on:
   push:
     branches-ignore:
-      - '**'
+      - 'covalent'
     tags:
       - 'v*.*.*'
       # to be used by fork patch-releases ^^
