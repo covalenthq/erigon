@@ -7,9 +7,10 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types"
 	types2 "github.com/ledgerwatch/erigon/core/types"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 const (
@@ -22,23 +23,23 @@ const (
 type BlockReplica struct {
 	Type            string
 	NetworkId       uint64
-	Hash            common.Hash
+	Hash            libcommon.Hash
 	TotalDifficulty *BigInt
 	Header          *Header
 	Transactions    []*Transaction
 	Uncles          []*Header `json:"uncles"`
 	Receipts        []*Receipt
-	Senders         []common.Address
+	Senders         []libcommon.Address
 	State           *StateSpecimen `json:"State"`
 	Withdrawals     []*Withdrawal
 	BlobTxSidecars  []*BlobTxSidecar
 }
 
 type Withdrawal struct {
-	Index     uint64         `json:"index"`          // monotonically increasing identifier issued by consensus layer
-	Validator uint64         `json:"validatorIndex"` // index of validator associated with withdrawal
-	Address   common.Address `json:"address"`        // target address for withdrawn ether
-	Amount    uint64         `json:"amount"`         // value of withdrawal in GWei
+	Index     uint64            `json:"index"`          // monotonically increasing identifier issued by consensus layer
+	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
+	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
+	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
 }
 
 type StateSpecimen struct {
@@ -77,91 +78,91 @@ func (b *Bloom) SetBytes(d []byte) {
 }
 
 type Header struct {
-	ParentHash       common.Hash    `json:"parentHash"`
-	UncleHash        common.Hash    `json:"sha3Uncles"`
-	Coinbase         common.Address `json:"miner"`
-	Root             common.Hash    `json:"stateRoot"`
-	TxHash           common.Hash    `json:"transactionsRoot"`
-	ReceiptHash      common.Hash    `json:"receiptsRoot"`
-	Bloom            Bloom          `json:"logsBloom"`
-	Difficulty       *BigInt        `json:"difficulty"`
-	Number           *BigInt        `json:"number"`
-	GasLimit         uint64         `json:"gasLimit"`
-	GasUsed          uint64         `json:"gasUsed"`
-	Time             uint64         `json:"timestamp"`
-	Extra            []byte         `json:"extraData"`
-	MixDigest        common.Hash    `json:"mixHash"`
-	Nonce            BlockNonce     `json:"nonce"`
-	BaseFee          *BigInt        `json:"baseFeePerGas"`
-	WithdrawalsHash  *common.Hash   `json:"withdrawalsRoot" rlp:"nil,optional"`
-	BlobGasUsed      *uint64        `json:"blobGasUsed" rlp:"optional"`
-	ExcessBlobGas    *uint64        `json:"excessBlobGas" rlp:"optional"`
-	ParentBeaconRoot *common.Hash   `json:"parentBeaconBlockRoot" rlp:"optional"`
+	ParentHash       libcommon.Hash    `json:"parentHash"`
+	UncleHash        libcommon.Hash    `json:"sha3Uncles"`
+	Coinbase         libcommon.Address `json:"miner"`
+	Root             libcommon.Hash    `json:"stateRoot"`
+	TxHash           libcommon.Hash    `json:"transactionsRoot"`
+	ReceiptHash      libcommon.Hash    `json:"receiptsRoot"`
+	Bloom            Bloom             `json:"logsBloom"`
+	Difficulty       *BigInt           `json:"difficulty"`
+	Number           *BigInt           `json:"number"`
+	GasLimit         uint64            `json:"gasLimit"`
+	GasUsed          uint64            `json:"gasUsed"`
+	Time             uint64            `json:"timestamp"`
+	Extra            []byte            `json:"extraData"`
+	MixDigest        libcommon.Hash    `json:"mixHash"`
+	Nonce            BlockNonce        `json:"nonce"`
+	BaseFee          *BigInt           `json:"baseFeePerGas"`
+	WithdrawalsHash  *libcommon.Hash   `json:"withdrawalsRoot" rlp:"nil,optional"`
+	BlobGasUsed      *uint64           `json:"blobGasUsed" rlp:"optional"`
+	ExcessBlobGas    *uint64           `json:"excessBlobGas" rlp:"optional"`
+	ParentBeaconRoot *libcommon.Hash   `json:"parentBeaconBlockRoot" rlp:"optional"`
 }
 
 type Transaction struct {
-	Type         byte             `json:"type"`
-	AccessList   types.AccessList `json:"accessList"`
-	ChainId      *BigInt          `json:"chainId"`
-	AccountNonce uint64           `json:"nonce"`
-	Price        *BigInt          `json:"gasPrice"`
-	GasLimit     uint64           `json:"gas"`
-	GasTipCap    *BigInt          `json:"gasTipCap"`
-	GasFeeCap    *BigInt          `json:"gasFeeCap"`
-	Sender       *common.Address  `json:"from"`
-	Recipient    *common.Address  `json:"to" rlp:"nil"` // nil means contract creation
-	Amount       *BigInt          `json:"value"`
-	Payload      []byte           `json:"input"`
-	V            *BigInt          `json:"v"`
-	R            *BigInt          `json:"r"`
-	S            *BigInt          `json:"s"`
-	BlobFeeCap   *BigInt          `json:"blobFeeCap" rlp:"optional"`
-	BlobHashes   []common.Hash    `json:"blobHashes" rlp:"optional"`
-	BlobGas      uint64           `json:"blobGas" rlp:"optional"`
+	Type         byte               `json:"type"`
+	AccessList   types.AccessList   `json:"accessList"`
+	ChainId      *BigInt            `json:"chainId"`
+	AccountNonce uint64             `json:"nonce"`
+	Price        *BigInt            `json:"gasPrice"`
+	GasLimit     uint64             `json:"gas"`
+	GasTipCap    *BigInt            `json:"gasTipCap"`
+	GasFeeCap    *BigInt            `json:"gasFeeCap"`
+	Sender       *libcommon.Address `json:"from"`
+	Recipient    *libcommon.Address `json:"to" rlp:"nil"` // nil means contract creation
+	Amount       *BigInt            `json:"value"`
+	Payload      []byte             `json:"input"`
+	V            *BigInt            `json:"v"`
+	R            *BigInt            `json:"r"`
+	S            *BigInt            `json:"s"`
+	BlobFeeCap   *BigInt            `json:"blobFeeCap" rlp:"optional"`
+	BlobHashes   []libcommon.Hash   `json:"blobHashes" rlp:"optional"`
+	BlobGas      uint64             `json:"blobGas" rlp:"optional"`
 }
 
 type Logs struct {
-	Address     common.Address `json:"address"`
-	Topics      []common.Hash  `json:"topics"`
-	Data        []byte         `json:"data"`
-	BlockNumber uint64         `json:"blockNumber"`
-	TxHash      common.Hash    `json:"transactionHash"`
-	TxIndex     uint           `json:"transactionIndex"`
-	BlockHash   common.Hash    `json:"blockHash"`
-	Index       uint           `json:"logIndex"`
-	Removed     bool           `json:"removed"`
+	Address     libcommon.Address `json:"address"`
+	Topics      []libcommon.Hash  `json:"topics"`
+	Data        []byte            `json:"data"`
+	BlockNumber uint64            `json:"blockNumber"`
+	TxHash      libcommon.Hash    `json:"transactionHash"`
+	TxIndex     uint              `json:"transactionIndex"`
+	BlockHash   libcommon.Hash    `json:"blockHash"`
+	Index       uint              `json:"logIndex"`
+	Removed     bool              `json:"removed"`
 }
 
 type Receipt struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	TxHash            common.Hash
-	ContractAddress   common.Address
+	TxHash            libcommon.Hash
+	ContractAddress   libcommon.Address
 	Logs              []*Logs
 	GasUsed           uint64
 }
 
 type AccountRead struct {
-	Address  common.Address
+	Address  libcommon.Address
 	Nonce    uint64
 	Balance  *BigInt
-	CodeHash common.Hash
+	CodeHash libcommon.Hash
 }
 
 type StorageRead struct {
-	Account common.Address
-	SlotKey common.Hash
-	Value   common.Hash
+	Account libcommon.Address
+	SlotKey libcommon.Hash
+	Value   libcommon.Hash
 }
 
 type CodeRead struct {
-	Hash common.Hash
+	Hash libcommon.Hash
 	Code []byte
 }
 
 type BlockhashRead struct {
 	BlockNumber uint64
-	BlockHash   common.Hash
+	BlockHash   libcommon.Hash
 }
 
 // BlobTxSidecar contains the blobs of a blob transaction.

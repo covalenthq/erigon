@@ -553,7 +553,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 			return legacyTx, nil
 		}
 
-	case types.DynamicFeeTxType, types.BlobTxType:
+	case types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if txJson.Tip != nil {
@@ -588,6 +588,10 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
 		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
 
+		if txJson.Type == types.DynamicFeeTxType {
+			return &dynamicFeeTx, nil
+		}
+
 		if txJson.Type == types.BlobTxType {
 			blobFee, overflow := uint256.FromBig((*big.Int)(txJson.MaxFeePerBlobGas))
 			if overflow {
@@ -597,6 +601,21 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 				DynamicFeeTransaction: dynamicFeeTx,
 				MaxFeePerBlobGas:      blobFee,
 				BlobVersionedHashes:   txJson.BlobVersionedHashes,
+			}, nil
+		}
+
+		if txJson.Type == types.SetCodeTxType {
+			auths := make([]types.Authorization, 0)
+			for _, auth := range *txJson.Authorizations {
+				a, err := auth.ToAuthorization()
+				if err != nil {
+					return nil, err
+				}
+				auths = append(auths, a)
+			}
+			return &types.SetCodeTransaction{
+				DynamicFeeTransaction: dynamicFeeTx,
+				Authorizations:        auths,
 			}, nil
 		} else {
 			return &dynamicFeeTx, nil
