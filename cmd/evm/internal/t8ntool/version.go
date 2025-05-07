@@ -9,7 +9,7 @@ import (
 const (
 	EvmServerVersionMajor = 1
 	EvmServerVersionMinor = 3
-	EvmServerVersionPatch = 2
+	EvmServerVersionPatch = 3
 	clientIdentifier      = "evm-server" // Client identifier to advertise over the network
 )
 
