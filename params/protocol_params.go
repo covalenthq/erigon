@@ -171,7 +171,11 @@ const (
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
+	// EIP-7702
+	SetCodeMagicPrefix = byte(0x05)
 )
+
+var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 
 // EIP-4788: Beacon block root in the EVM
 var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
