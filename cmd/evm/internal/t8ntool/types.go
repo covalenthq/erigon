@@ -33,6 +33,7 @@ type BlockReplica struct {
 	State           *StateSpecimen `json:"State"`
 	Withdrawals     []*Withdrawal
 	BlobTxSidecars  []*BlobTxSidecar
+	RequestsHash    *libcommon.Hash
 }
 
 type Withdrawal struct {
@@ -98,27 +99,30 @@ type Header struct {
 	BlobGasUsed      *uint64           `json:"blobGasUsed" rlp:"optional"`
 	ExcessBlobGas    *uint64           `json:"excessBlobGas" rlp:"optional"`
 	ParentBeaconRoot *libcommon.Hash   `json:"parentBeaconBlockRoot" rlp:"optional"`
+	RequestsHash     *libcommon.Hash   `json:"requestsHash" rlp:"optional"`
 }
 
 type Transaction struct {
-	Type         byte               `json:"type"`
-	AccessList   types.AccessList   `json:"accessList"`
-	ChainId      *BigInt            `json:"chainId"`
-	AccountNonce uint64             `json:"nonce"`
-	Price        *BigInt            `json:"gasPrice"`
-	GasLimit     uint64             `json:"gas"`
-	GasTipCap    *BigInt            `json:"gasTipCap"`
-	GasFeeCap    *BigInt            `json:"gasFeeCap"`
-	Sender       *libcommon.Address `json:"from"`
-	Recipient    *libcommon.Address `json:"to" rlp:"nil"` // nil means contract creation
-	Amount       *BigInt            `json:"value"`
-	Payload      []byte             `json:"input"`
-	V            *BigInt            `json:"v"`
-	R            *BigInt            `json:"r"`
-	S            *BigInt            `json:"s"`
-	BlobFeeCap   *BigInt            `json:"blobFeeCap" rlp:"optional"`
-	BlobHashes   []libcommon.Hash   `json:"blobHashes" rlp:"optional"`
-	BlobGas      uint64             `json:"blobGas" rlp:"optional"`
+	Type         byte                   `json:"type"`
+	AccessList   types.AccessList       `json:"accessList"`
+	ChainId      *BigInt                `json:"chainId"`
+	AccountNonce uint64                 `json:"nonce"`
+	Price        *BigInt                `json:"gasPrice"`
+	GasLimit     uint64                 `json:"gas"`
+	GasTipCap    *BigInt                `json:"gasTipCap"`
+	GasFeeCap    *BigInt                `json:"gasFeeCap"`
+	Sender       *libcommon.Address     `json:"from"`
+	Recipient    *libcommon.Address     `json:"to" rlp:"nil"` // nil means contract creation
+	Amount       *BigInt                `json:"value"`
+	Payload      []byte                 `json:"input"`
+	V            *BigInt                `json:"v"`
+	R            *BigInt                `json:"r"`
+	S            *BigInt                `json:"s"`
+	BlobFeeCap   *BigInt                `json:"blobFeeCap" rlp:"optional"`
+	BlobHashes   []libcommon.Hash       `json:"blobHashes" rlp:"optional"`
+	BlobGas      uint64                 `json:"blobGas" rlp:"optional"`
+	Data         []byte                 `rlp:"optional"`
+	AuthList     []types2.Authorization `rlp:"optional"`
 }
 
 type Logs struct {
@@ -193,6 +197,7 @@ func adaptHeader(header *types2.Header) (*Header, error) {
 		BlobGasUsed:      header.BlobGasUsed,
 		ExcessBlobGas:    header.ExcessBlobGas,
 		ParentBeaconRoot: header.ParentBeaconBlockRoot,
+		RequestsHash:     header.RequestsHash,
 	}, nil
 }
 
@@ -206,6 +211,7 @@ func copyMissingHashesFromReplica(header *Header, inputReplica *BlockReplica) {
 	header.BlobGasUsed = inputReplica.Header.BlobGasUsed
 	header.ExcessBlobGas = inputReplica.Header.ExcessBlobGas
 	header.ParentBeaconRoot = inputReplica.Header.ParentBeaconRoot
+	header.RequestsHash = inputReplica.Header.RequestsHash
 }
 
 func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
@@ -343,6 +349,48 @@ func (tx *Transaction) adaptTransaction() (types2.Transaction, error) {
 		}
 		setSignatureValues(&blobTx.DynamicFeeTransaction.CommonTx, tx.V, tx.R, tx.S)
 		return &blobTx, nil
+
+	case types.SetCodeTxType:
+		var tip *uint256.Int
+		var feeCap *uint256.Int
+		if tx.GasTipCap != nil {
+			tip, overflow = uint256.FromBig((*big.Int)(tx.GasTipCap.Int))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		if tx.GasFeeCap != nil {
+			feeCap, overflow = uint256.FromBig((*big.Int)(tx.GasFeeCap.Int))
+			if overflow {
+				return nil, fmt.Errorf("GasTipCap field caused an overflow (uint256)")
+			}
+		}
+
+		dynamicFeeTx := types2.DynamicFeeTransaction{
+			CommonTx: types2.CommonTx{
+				Nonce: uint64(tx.AccountNonce),
+				To:    tx.Recipient,
+				Value: value,
+				Gas:   uint64(tx.GasLimit),
+				Data:  tx.Payload,
+			},
+			ChainID:    chainId,
+			Tip:        tip,
+			FeeCap:     feeCap,
+			AccessList: tx.AccessList,
+		}
+
+		setCodeTx := types2.SetCodeTransaction{
+			DynamicFeeTransaction: dynamicFeeTx,
+			Authorizations:        tx.AuthList,
+		}
+
+		if tx.Sender != nil {
+			setCodeTx.DynamicFeeTransaction.CommonTx.SetFrom(*tx.Sender)
+		}
+		setSignatureValues(&setCodeTx.DynamicFeeTransaction.CommonTx, tx.V, tx.R, tx.S)
+		return &setCodeTx, nil
 
 	default:
 		return nil, nil
