@@ -104,6 +104,7 @@ type Header struct {
 	ExcessBlobGas *uint64 `json:"excessBlobGas"`
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	RequestsHash          *libcommon.Hash `json:"requestsHash"`          // EIP-4844
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool

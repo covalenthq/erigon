@@ -64,6 +64,7 @@ type stEnv struct {
 	BlobGasUsed      *uint64                                `json:"blobGasUsed" rlp:"optional"`
 	ExcessBlobGas    *uint64                                `json:"excessBlobGas" rlp:"optional"`
 	ParentBeaconRoot *libcommon.Hash                        `json:"parentBeaconBlockRoot" rlp:"optional"`
+	RequestsHash     *libcommon.Hash                        `json:"requestsHash" rlp:"optional"`
 }
 
 type stEnvMarshaling struct {
@@ -79,6 +80,7 @@ type stEnvMarshaling struct {
 	BlobGasUsed      *math.HexOrDecimal64
 	ExcessBlobGas    *math.HexOrDecimal64
 	ParentBeaconRoot *libcommon.Address
+	RequestsHash     *libcommon.Address
 }
 
 func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
@@ -88,6 +90,7 @@ func (stEnv *stEnv) loadFromReplica(replica *BlockReplica) {
 	stEnv.Number = replica.Header.Number.Uint64()
 	stEnv.Timestamp = replica.Header.Time
 	stEnv.BlockHashes = make(map[math.HexOrDecimal64]libcommon.Hash)
+	stEnv.RequestsHash = replica.Header.RequestsHash
 	for _, blockhash := range replica.State.BlockhashRead {
 		stEnv.BlockHashes[math.HexOrDecimal64(blockhash.BlockNumber)] = blockhash.BlockHash
 	}
